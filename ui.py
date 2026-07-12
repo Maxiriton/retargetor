@@ -19,6 +19,24 @@ class RETARGETOR_PT_RetargetPanel(Panel):
         box.prop(scene, "retarget_source_armature", text="Source")
         box.prop(scene, "retarget_target_armature", text="Target")
         box.prop(scene, "retarget_json_path", text="Lien JSON")
+
+        if len(context.scene.retarget_bones) == 0 :
+            layout.label(text='Il va falloir remplir ca')
+            layout.operator("retargetor.setup_bone_list")
+        else:
+            layout.operator("retargetor.setup_bone_list", text="Rebuild bone list")
+            layout.label(text="Bone list")
+            layout.template_list(
+                "RTGTR_UL_Bones", "bones",
+                scene, "retarget_bones",
+                scene, "retarget_bones_active_index"
+            )
+
+
+
+
+
+
         
         layout.separator()
         layout.label(text="Retarget", icon='ARMATURE_DATA')
@@ -27,10 +45,34 @@ class RETARGETOR_PT_RetargetPanel(Panel):
         layout.operator("retargetor.simple_retarget", icon='ANIM_DATA')
         layout.prop(scene, "lerp_rotation", text="Lerp Rotation")
 
+class RTGTR_UL_Bones(UIList):
+    """UI List for bones matching and setuping"""
+    def draw_item(self, context, layout, data, item, icon, active_data, active_property, index): # type: ignore
+        row = layout.row(align=True)
 
+        split = row.split(factor=0.3)
+        c = split.column()
+        if item.is_setuped:
+            c.label(text=item.src_name, icon='CHECKMARK')
+        else:
+            c.label(text=item.src_name, icon='DECORATE')
+        
+        split = split.split(factor=0.5)
+        c = split.column()
+        c.prop_search(
+            item,
+            "target_name",
+            context.scene.retarget_target_armature.pose,
+            "bones",
+            text=""
+        )
+    
+        c = split.column()
+        c.label(text=str(item.roll_offset))
 
 ### Registration
 classes = (
+    RTGTR_UL_Bones,
     RETARGETOR_PT_RetargetPanel,
 )
 

@@ -1,12 +1,9 @@
 # type: ignore
 """This module contains operator for kimodo retargeting"""
 
+import os
 import json
 import math
-import os
-
-import os
-
 import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty
@@ -42,7 +39,6 @@ def add_empties_at_target_bones(context):
 
     for bone_name, bone_info in target_armature['bone_mapping'].items():
         bone_tgt = target_armature.pose.bones.get(bone_name)
-        bone_scr = src_armature.pose.bones.get(bone_info.get("src_bone", ""))
 
         if bone_tgt:
             empty_name = f"Empty_{bone_name}"
@@ -60,18 +56,6 @@ def add_empties_at_target_bones(context):
             const_loc = empty.constraints.new('COPY_LOCATION')
             const_loc.target = context.scene.retarget_target_armature
             const_loc.subtarget = bone_tgt.name
-
-            # start_frame = scene.frame_start 
-            # end_frame = scene.frame_end
-    
-            # for frame in range(start_frame, end_frame + 1):
-            #     scene.frame_set(frame)
-            #     empty.rotation_quaternion = bone_scr.matrix.to_quaternion()
-            #     empty.keyframe_insert(data_path="rotation_quaternion", frame=frame)
-
-
-
-
 
 
 def init_bone_mapping_from_json(context, json_path):
@@ -107,6 +91,32 @@ def fill_bone_mapping_offset(context, source_armature, target_armature):
         bone_info['offset'] = rot_offset #we store the rotation offset 
         context.scene.retarget_target_armature['bone_mapping'][tgt_bone_name] = bone_info
 
+class RTGTR_Setup_Bone_List(Operator):
+    bl_idname = "retargetor.setup_bone_list"
+    bl_label = "Setup Bone list"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.retarget_source_armature is not None and \
+               context.scene.retarget_target_armature is not None 
+    
+    def execute(self, context):
+        scene = context.scene
+        scene.retarget_bones.clear()
+
+        target_obj = scene.retarget_target_armature 
+        source_obj = scene.retarget_source_armature
+
+        for bone in source_obj.pose.bones:
+            rtg_item = scene.retarget_bones.add()
+            rtg_item.src_name = bone.name
+            rtg_item.tgt_name = ""
+
+        self.report({'INFO'}, f"Found {len(scene.retarget_bones)} bones")
+        return {'FINISHED'}      
+
+
 
 
 class RTG_SimpleRetarget(Operator):
@@ -141,7 +151,10 @@ class RTG_SimpleRetarget(Operator):
         for frame in range(start_frame, end_frame + 1):
             scene.frame_set(frame)
             for tgt_bone_name, bone_info in target_obj['bone_mapping'].items():
-                if tgt_bone_name not in ["mixamorig1:LeftShoulder","mixamorig1:LeftArm","mixamorig1:LeftForeArm","mixamorig1:LeftHand"]:
+                # if tgt_bone_name not in ["mixamorig1:LeftShoulder","mixamorig1:LeftArm","mixamorig1:LeftForeArm","mixamorig1:LeftHand"]:
+                #     continue
+
+                if tgt_bone_name in ["mixamorig1:Hips"]:
                     continue
 
                 src_bone_name = bone_info["src_bone"]
@@ -284,7 +297,8 @@ class SetupArmatureConstraint(Operator):
 ### Registration
 classes = (
     SetupArmatureConstraint,
-    RTG_SimpleRetarget
+    RTG_SimpleRetarget,
+    RTGTR_Setup_Bone_List
 )
 
 def register():

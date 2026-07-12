@@ -25,13 +25,44 @@ bl_info = {
 }
 
 import bpy
+from bpy.props import StringProperty, BoolProperty, FloatProperty, EnumProperty, CollectionProperty
+from bpy.types import PropertyGroup
 
 from . import ui
 from . import retarget_operators
 
+#Bone offset
+offset_items = [
+    ('ROLL',"roll","", 0),
+    ("REST_OFFSET","offset","", 1)
+]
+
+
+class BoneRetargetInfo(PropertyGroup):
+    """Property group to store bone retarget data"""
+    src_name: StringProperty(name="Bone source name")
+    target_name : StringProperty(name="Bone target name")
+    rest_offset: StringProperty(name="Rest Offset",description="Quaternion difference between the two bones in their respective rest position", default="{}")
+    roll_offset: FloatProperty(name="Roll Offset", description="Rotation offset along target's local Y axis to match source coordinate system", subtype="ANGLE", default=0)
+    is_setuped: BoolProperty(name="Is Recorded", default=False)
+    offset_mode: EnumProperty(items=offset_items)
+
 
 def register_retarget_properties():
     """Register retargeting properties"""
+
+    bpy.types.Scene.retarget_bones = CollectionProperty(
+        type=BoneRetargetInfo,
+        name="Retarget Bones",
+        description="A collection of all bones info"
+    )
+
+    bpy.types.Scene.retarget_bones_active_index = bpy.props.IntProperty(
+        name="Bones Index",
+        default=0,
+        # update=setup_operators.on_shape_key_index_changed
+    )
+
     bpy.types.Scene.retarget_source_armature = bpy.props.PointerProperty( 
         type=bpy.types.Object,
         name="Armature Source",
@@ -65,7 +96,9 @@ def unregister_retarget_properties():
     del bpy.types.Scene.retarget_target_armature 
     del bpy.types.Scene.retarget_json_path 
 
-# classes = ()
+classes = (
+    BoneRetargetInfo,
+)
 
 addon_modules = (
     ui,
@@ -73,8 +106,8 @@ addon_modules = (
 )
 
 def register():
-    # for cls in classes:
-    #     bpy.utils.register_class(cls)
+    for cls in classes:
+        bpy.utils.register_class(cls)
 
     for mod in addon_modules:
         mod.register()
@@ -86,8 +119,8 @@ def unregister():
     for mod in reversed(addon_modules):
         mod.unregister()
 
-    # for cls in reversed(classes):
-    #     bpy.utils.unregister_class(cls)
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)
 
 
 if __name__ == "__main__":
