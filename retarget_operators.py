@@ -24,6 +24,15 @@ def callback_update_lerp_property(self, context):
     return None
 
 
+def find_bone_in_target(context, target_bone_name):
+    """ Find a bone in the target armature"""
+    tg_name = target_bone_name.lower()
+    for bone in context.scene.retarget_target_armature.pose.bones:
+        name = bone.name.lower()
+        if name in tg_name or tg_name in name:
+            return bone.name
+    return ""
+
 
 def add_empties_at_target_bones(context):
     """Add empties at the location of target bones for visualization"""
@@ -111,7 +120,12 @@ class RTGTR_Setup_Bone_List(Operator):
         for bone in source_obj.pose.bones:
             rtg_item = scene.retarget_bones.add()
             rtg_item.src_name = bone.name
-            rtg_item.tgt_name = ""
+
+            #we try to find the matching bones in target_armature (based on names only)
+            print(f"on va chercher la target pour {bone.name}")
+            rtg_item.target_name = find_bone_in_target(context, bone.name)
+
+            
 
         self.report({'INFO'}, f"Found {len(scene.retarget_bones)} bones")
         return {'FINISHED'}      

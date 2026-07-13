@@ -66,9 +66,10 @@ class RTGTR_UL_Bones(UIList):
             "bones",
             text=""
         )
-    
         c = split.column()
-        c.label(text=str(item.roll_offset))
+        row = c.row(align=True)
+        row.prop(item, "roll_offset", text="")
+        row.prop(item, "offset_mode", text="")
 
 ### Registration
 classes = (
