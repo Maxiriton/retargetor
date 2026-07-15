@@ -25,7 +25,7 @@ bl_info = {
 }
 
 import bpy
-from bpy.props import StringProperty, BoolProperty, FloatProperty, EnumProperty, CollectionProperty
+from bpy.props import StringProperty, BoolProperty, FloatProperty, FloatVectorProperty, EnumProperty, CollectionProperty
 from bpy.types import PropertyGroup
 
 from . import ui
@@ -33,8 +33,8 @@ from . import retarget_operators
 
 #Bone offset
 offset_items = [
-    ('ROLL',"roll","", 0),
-    ("REST_OFFSET","offset","", 1)
+    ('ROLL',"Roll","Subtract the edit bones roll difference", 0),
+    ("REST_OFFSET","Offset","Subtract the rotation offset between two rest poses", 1)
 ]
 
 
@@ -42,10 +42,10 @@ class BoneRetargetInfo(PropertyGroup):
     """Property group to store bone retarget data"""
     src_name: StringProperty(name="Bone source name")
     target_name : StringProperty(name="Bone target name")
-    rest_offset: StringProperty(name="Rest Offset",description="Quaternion difference between the two bones in their respective rest position", default="{}")
+    rest_offset: FloatVectorProperty(name="Rest Offset",description="Quaternion difference between the two bones in their respective rest position",size=4,default=(1.0, 0.0, 0.0, 0.0))
     roll_offset: FloatProperty(name="Roll Offset", description="Rotation offset along target's local Y axis to match source coordinate system", subtype="ANGLE", default=0)
     is_setuped: BoolProperty(name="Is Recorded", default=False)
-    offset_mode: EnumProperty(items=offset_items)
+    offset_mode: EnumProperty(items=offset_items, description="Select the offset to apply after aligning bones.")
 
 
 def register_retarget_properties():
