@@ -30,6 +30,7 @@ from bpy.types import PropertyGroup
 
 from . import ui
 from . import retarget_operators
+from . import setup_operators
 
 #Bone offset
 offset_items = [
@@ -41,7 +42,7 @@ offset_items = [
 class BoneRetargetInfo(PropertyGroup):
     """Property group to store bone retarget data"""
     src_name: StringProperty(name="Bone source name")
-    target_name : StringProperty(name="Bone target name",update=retarget_operators.update_target_bone)
+    target_name : StringProperty(name="Bone target name",update=setup_operators.update_target_bone)
     rest_offset: FloatVectorProperty(name="Rest Offset",description="Quaternion difference between the two bones in their respective rest position",size=4,default=(1.0, 0.0, 0.0, 0.0))
     roll_offset: FloatProperty(name="Roll Offset", description="Rotation offset along target's local Y axis to match source coordinate system", subtype="ANGLE", default=0)
     is_setup: BoolProperty(name="Is Recorded", default=False)
@@ -69,14 +70,14 @@ def register_retarget_properties():
         poll=lambda self, obj: obj.type == 'ARMATURE' 
     )
 
-    bpy.types.Scene.lerp_rotation = bpy.props.FloatProperty( 
-        name="Lerp Rotation",
-        default=1.0,
-        min=0.0,
-        max=1.0,
-        subtype='FACTOR',
-        description="Lerp factor for rotation blending between source and target bones",
-        update=retarget_operators.callback_update_lerp_property)
+    # bpy.types.Scene.lerp_rotation = bpy.props.FloatProperty( 
+    #     name="Lerp Rotation",
+    #     default=1.0,
+    #     min=0.0,
+    #     max=1.0,
+    #     subtype='FACTOR',
+    #     description="Lerp factor for rotation blending between source and target bones",
+    #     update=retarget_operators.callback_update_lerp_property)
 
     bpy.types.Scene.retarget_target_armature = bpy.props.PointerProperty( 
         type=bpy.types.Object,
@@ -102,7 +103,8 @@ classes = (
 
 addon_modules = (
     ui,
-    retarget_operators
+    setup_operators,
+    retarget_operators,
 )
 
 def register():

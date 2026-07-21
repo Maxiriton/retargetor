@@ -32,18 +32,13 @@ class RETARGETOR_PT_RetargetPanel(Panel):
                 scene, "retarget_bones_active_index"
             )
 
-
-
-
-
-
         
         layout.separator()
         layout.label(text="Retarget", icon='ARMATURE_DATA')
         
         # Bouton pour lancer l'action
         layout.operator("retargetor.simple_retarget", icon='ANIM_DATA')
-        layout.prop(scene, "lerp_rotation", text="Lerp Rotation")
+        # layout.prop(scene, "lerp_rotation", text="Lerp Rotation")
 
 class RTGTR_UL_Bones(UIList):
     """UI List for bones matching and setuping"""
