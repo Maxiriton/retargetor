@@ -22,15 +22,25 @@ class RETARGETOR_PT_RetargetPanel(Panel):
 
         if len(context.scene.retarget_bones) == 0 :
             layout.label(text='Il va falloir remplir ca')
-            layout.operator("retargetor.setup_bone_list")
+            row = layout.row(align=True)
+            s = row.split(factor=0.7)
+            s.operator("retargetor.setup_bone_list")
+            c = s.column()
+            c.operator("retargetor.import_retarget_json")
         else:
-            layout.operator("retargetor.setup_bone_list", text="Rebuild bone list")
+            row = layout.row(align=True)
+            s = row.split(factor=0.7)
+            c = s.column()
+            c.operator("retargetor.setup_bone_list", text="Rebuild bone list")
+            c = s.column()
+            c.operator("retargetor.import_retarget_json")
             layout.label(text="Bone list")
             layout.template_list(
                 "RTGTR_UL_Bones", "bones",
                 scene, "retarget_bones",
                 scene, "retarget_bones_active_index"
             )
+            layout.operator('retargetor.export_setup_to_json', text="Export to json")
 
         
         layout.separator()
