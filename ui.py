@@ -52,7 +52,7 @@ class RTGTR_UL_Bones(UIList):
 
         split = row.split(factor=0.3)
         c = split.column()
-        if item.is_setuped:
+        if item.is_setup:
             c.label(text=item.src_name, icon='CHECKMARK')
         else:
             c.label(text=item.src_name, icon='DECORATE')

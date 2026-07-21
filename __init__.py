@@ -41,10 +41,10 @@ offset_items = [
 class BoneRetargetInfo(PropertyGroup):
     """Property group to store bone retarget data"""
     src_name: StringProperty(name="Bone source name")
-    target_name : StringProperty(name="Bone target name")
+    target_name : StringProperty(name="Bone target name",update=retarget_operators.update_target_bone)
     rest_offset: FloatVectorProperty(name="Rest Offset",description="Quaternion difference between the two bones in their respective rest position",size=4,default=(1.0, 0.0, 0.0, 0.0))
     roll_offset: FloatProperty(name="Roll Offset", description="Rotation offset along target's local Y axis to match source coordinate system", subtype="ANGLE", default=0)
-    is_setuped: BoolProperty(name="Is Recorded", default=False)
+    is_setup: BoolProperty(name="Is Recorded", default=False)
     offset_mode: EnumProperty(items=offset_items, description="Select the offset to apply after aligning bones.")
 
 

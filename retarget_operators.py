@@ -29,6 +29,11 @@ def compute_rest_offset(context, bone_source_name, bone_target_name):
     return rot_tgt.rotation_difference(rot_src)
 
 
+def update_target_bone(self, context):
+    self.roll_offset = compute_bone_offset(context, self.src_name, self.target_name)
+    self.rest_offset = compute_rest_offset(context, self.src_name, self.target_name)
+    self.is_setup = True
+
 def callback_update_lerp_property(self, context):
     lerp_value = self.lerp_rotation
     tgt_armature = context.scene.retarget_target_armature
@@ -98,7 +103,7 @@ class RTGTR_Setup_Bone_List(Operator):
             if rtg_item.target_name: 
                 rtg_item.roll_offset = compute_bone_offset(context, rtg_item.src_name, rtg_item.target_name)
                 rtg_item.rest_offset = compute_rest_offset(context, rtg_item.src_name, rtg_item.target_name)
-            
+                rtg_item.is_setup = True
 
         self.report({'INFO'}, f"Found {len(scene.retarget_bones)} bones")
         return {'FINISHED'}      
@@ -122,52 +127,39 @@ class RTG_SimpleRetarget(Operator):
         target_obj = scene.retarget_target_armature 
         source_obj = scene.retarget_source_armature 
 
-        #we create a dictionary to store the bone_tgt mapping and store it in the scene for later use
-        init_bone_mapping_from_json(context, scene.retarget_json_path)  
-        #we fill the dict with the rotation offsets based on the rest pose of source and target armatures
-        fill_bone_mapping_offset(context, source_obj, target_obj)  
-
-        add_empties_at_target_bones(context)  # Add empties at target bone_tgt locations for visualization
-
         start_frame = scene.frame_start 
         end_frame = scene.frame_end
     
-
         for frame in range(start_frame, end_frame + 1):
             scene.frame_set(frame)
-            for tgt_bone_name, bone_info in target_obj['bone_mapping'].items():
-                # if tgt_bone_name not in ["mixamorig1:LeftShoulder","mixamorig1:LeftArm","mixamorig1:LeftForeArm","mixamorig1:LeftHand"]:
-                #     continue
-
-                if tgt_bone_name in ["mixamorig1:Hips"]:
+            for item in scene.retarget_bones:
+                if not item.is_setup :
+                    continue
+ 
+                if item.target_name in ["mixamorig1:Hips"]:
+                    print('on ignore le hips')
                     continue
 
-                src_bone_name = bone_info["src_bone"]
-                src_bone = source_obj.pose.bones.get(src_bone_name)
-                tgt_bone = target_obj.pose.bones.get(tgt_bone_name)
+                src_bone = source_obj.pose.bones.get(item.src_name)
+                tgt_bone = target_obj.pose.bones.get(item.target_name)
 
                 tgt_bone.rotation_mode = 'QUATERNION'
                 tgt_bone.matrix = src_bone.matrix
 
-                angle_rad = math.radians(90)  # 90
-                q_correction = Quaternion(Vector((0.0,1.0,0.0)), angle_rad)
-                q_offset = Quaternion(bone_info['offset'])
+                q_correction = Quaternion.identity
+                if item.offset_mode == 'ROLL':
+                    q_correction = Quaternion(Vector((0.0,1.0,0.0)), item.roll_offset)
+                elif item.offset_mode == 'REST_OFFSET' :
+                    q_correction = Quaternion(item.rest_offset)
                 
                 
-                q_actuel = tgt_bone.rotation_quaternion.copy()
-
-                tgt_bone.rotation_quaternion = q_actuel @ q_correction
-                # tgt_bone.rotation_quaternion = q_actuel @ q_offset
-
-
-
+                q_rot = tgt_bone.rotation_quaternion
+                tgt_bone.rotation_quaternion = q_rot @ q_correction
 
                 tgt_bone.location = Vector((0.0, 0.0, 0.0))  # Reset location to avoid unwanted translation
                 
                 # Gestion de la translation pour les Hips / Root
-                if "hips" in tgt_bone_name.lower() or "root" in tgt_bone_name.lower():
-                    # Optionnel : Tu peux copier la position du Hips monde si nécessaire
-                    # tgt_bone.location = (target_obj.matrix_world.inverted() @ matrix_src_current_world).to_translation()
+                if "hips" in item.target_name.lower() or "root" in item.target_name.lower():
                     tgt_bone.keyframe_insert(data_path="location", frame=frame)
                 
                 tgt_bone.keyframe_insert(data_path="rotation_quaternion", frame=frame)
