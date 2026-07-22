@@ -100,8 +100,13 @@ class RTGTR_snap_selected_bone(Operator):
         tgt_bone = context.active_object.data.bones.active
         matching_items = get_items_by_target_name(context.scene.retarget_bones, tgt_bone.name)
 
-        if len(matching_items) != 1:
+        if len(matching_items) == 0:
+            self.report({'INFO'}, f"No matching bone for selected target")
             return {'CANCELLED'}
+        elif len(matching_items) > 1:
+            self.report({'INFO'}, f"There are several bones that matches this one. This should not happen.")
+            return {'CANCELLED'}
+        
 
         item = matching_items[0]
         src_bone = context.scene.retarget_source_armature.data.bones[item.src_name]
