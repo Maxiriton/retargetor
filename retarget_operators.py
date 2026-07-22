@@ -1,10 +1,19 @@
 # type: ignore
 """This module contains operator for kimodo retargeting"""
-
-
 import bpy
 from bpy.types import Operator
+from bpy.props import BoolProperty
 from mathutils import Quaternion, Vector
+
+def get_items_by_target_name(collection, target_name):
+    """
+    Retourne la liste de tous les BoneRetargetInfo ayant le target_name spécifié.
+    
+    :param collection: La CollectionProperty (ex: context.scene.my_retarget_collection)
+    :param target_name: Le nom de l'os cible à rechercher (str)
+    :return: List[BoneRetargetInfo]
+    """
+    return [item for item in collection if item.target_name == target_name]
 
 class RTGTR_SimpleRetarget(Operator):
     bl_idname = "retargetor.simple_retarget"
@@ -64,11 +73,69 @@ class RTGTR_SimpleRetarget(Operator):
         self.report({'INFO'}, f"Reciblage réussi sur {end_frame - start_frame + 1} frames.")
         return {'FINISHED'}
 
+class RTGTR_snap_selected_bone(Operator):
+    """Snap the current selected bone"""
+
+    bl_idname = "retargetor.snap_selected_bone"
+    bl_label = "Snap active bone"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    add_roll : BoolProperty(
+        name="Add roll rotation",
+        default=False
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.retarget_source_armature is not None and \
+               context.scene.retarget_target_armature is not None and \
+               context.mode == 'POSE' and \
+               context.active_object.name == context.scene.retarget_target_armature.name
     
+    
+    def execute(self, context):
+        target_obj = context.scene.retarget_target_armature 
+        source_obj = context.scene.retarget_source_armature 
+    
+        tgt_bone = context.active_object.data.bones.active
+        matching_items = get_items_by_target_name(context.scene.retarget_bones, tgt_bone.name)
+
+        if len(matching_items) != 1:
+            return {'CANCELLED'}
+
+        item = matching_items[0]
+        src_bone = context.scene.retarget_source_armature.data.bones[item.src_name]
+        print(f"Le bone actif est {tgt_bone.name} et le bone source est {src_bone.name}")
+
+        src_pose_bone = source_obj.pose.bones.get(src_bone.name)
+        tgt_pose_bone = target_obj.pose.bones.get(tgt_bone.name)
+
+        tgt_pose_bone.rotation_mode = 'QUATERNION'
+        tgt_pose_bone.matrix = src_pose_bone.matrix
+
+
+        if self.add_roll: 
+            q_correction = Quaternion.identity
+            if item.offset_mode == 'ROLL':
+                q_correction = Quaternion(Vector((0.0,1.0,0.0)), item.roll_offset)
+            elif item.offset_mode == 'REST_OFFSET' :
+                q_correction = Quaternion(item.rest_offset)
+        
+            q_rot = tgt_pose_bone.rotation_quaternion
+            tgt_pose_bone.rotation_quaternion = q_rot @ q_correction
+
+
+        tgt_pose_bone.location = Vector((0.0, 0.0, 0.0))  # Reset location to avoid unwanted translation
+                
+        return {'FINISHED'}
+
+    
+
 
 ### Registration
 classes = (
     RTGTR_SimpleRetarget,
+    RTGTR_snap_selected_bone,
 )
 
 def register():

@@ -48,6 +48,7 @@ class RETARGETOR_PT_RetargetPanel(Panel):
         
         # Bouton pour lancer l'action
         layout.operator("retargetor.simple_retarget", icon='ANIM_DATA')
+        layout.operator("retargetor.snap_selected_bone", icon='ANIM_DATA')
         # layout.prop(scene, "lerp_rotation", text="Lerp Rotation")
 
 class RTGTR_UL_Bones(UIList):
