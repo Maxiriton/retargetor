@@ -9,9 +9,13 @@ from mathutils import Vector, Quaternion
 
 def update_target_bone(self, context):
     """Callback function call when a user setup a match for bone source/target"""
-    self.roll_offset = compute_bone_offset(context, self.src_name, self.target_name)
-    self.rest_offset = compute_rest_offset(context, self.src_name, self.target_name)
-    self.is_setup = True
+    if self.target_name:
+        self.roll_offset = compute_bone_offset(context, self.src_name, self.target_name)
+        self.rest_offset = compute_rest_offset(context, self.src_name, self.target_name)
+        self.is_setup = True
+        print(f"New offset computed : {Quaternion(self.rest_offset).to_euler()} | New roll computed : {self.roll_offset}")
+    else:
+        self.is_setup = False
 
 
 def compute_bone_offset(context, bone_source_name, bone_target_name):
@@ -27,7 +31,7 @@ def compute_rest_offset(context, bone_source_name, bone_target_name):
     """Get the rotation difference between the two bones"""
     rot_src = context.scene.retarget_source_armature.data.bones[bone_source_name].matrix_local.copy().to_quaternion()
     rot_tgt = context.scene.retarget_target_armature.data.bones[bone_target_name].matrix_local.copy().to_quaternion()
-    return rot_tgt.rotation_difference(rot_src)
+    return rot_src.rotation_difference(rot_tgt)
 
 def find_bone_in_target(context, target_bone_name):
     """ Find a bone in the target armature"""
