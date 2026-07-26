@@ -11,7 +11,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#type: ignore
+
+# type : ignore
 
 bl_info = {
     "name": "Retargetor",
@@ -27,6 +28,7 @@ bl_info = {
 import bpy
 from bpy.props import StringProperty, BoolProperty, FloatProperty, FloatVectorProperty, EnumProperty, CollectionProperty
 from bpy.types import PropertyGroup
+from bpy.app.handlers import persistent
 
 from . import ui
 from . import retarget_operators
@@ -37,6 +39,52 @@ offset_items = [
     ('ROLL',"Roll","Subtract the edit bones roll difference", 0),
     ("REST_OFFSET","Offset","Subtract the rotation offset between two rest poses", 1)
 ]
+
+def set_active_item_by_target(scene, target_name):
+    collection = scene.retarget_bones
+    for index, item in enumerate(collection):
+        if item.target_name == target_name:
+            scene.retarget_bones_active_index = index 
+            return True
+    return False
+
+def set_active_item_by_source(scene, target_name):
+    collection = scene.retarget_bones
+    for index, item in enumerate(collection):
+        if item.src_name == target_name:
+            scene.retarget_bones_active_index = index 
+            return True
+    return False
+
+
+def on_bone_selection_changed(scene, pose_bone):
+    active_obj = bpy.context.active_object
+    if active_obj is scene.retarget_source_armature:
+        found = set_active_item_by_source(scene, pose_bone.name)
+        if not found:
+            print(f"Pas de bone défini pour {pose_bone.name} dans l'armature target")
+    elif active_obj is scene.retarget_target_armature:
+        found = set_active_item_by_target(scene, pose_bone.name)
+        if not found:
+            print(f"Pas de bone défini pour {pose_bone.name} dans l'armature source")
+
+
+@persistent
+def check_bone_selection_handler(scene):
+    active_obj = bpy.context.active_object
+    if active_obj and active_obj.type == 'ARMATURE' and active_obj.mode == 'POSE':
+        active_bone = active_obj.data.bones.active
+        
+        if active_bone:
+            # 3. Si l'os actif a changé par rapport à notre dernière sauvegarde
+            if active_bone.name != scene.last_active_bone_name:
+                scene.last_active_bone_name = active_bone.name
+                pose_bone = active_obj.pose.bones.get(active_bone.name)
+                on_bone_selection_changed(scene, pose_bone)
+        else:
+            scene.last_active_bone_name = ""
+    else:
+        scene.last_active_bone_name = ""
 
 
 class BoneRetargetInfo(PropertyGroup):
@@ -64,20 +112,16 @@ def register_retarget_properties():
         # update=setup_operators.on_shape_key_index_changed
     )
 
+    bpy.types.Scene.last_active_bone_name = bpy.props.StringProperty(
+        default="",
+        name="Last Selected Bone name"
+    )
+
     bpy.types.Scene.retarget_source_armature = bpy.props.PointerProperty( 
         type=bpy.types.Object,
         name="Armature Source",
         poll=lambda self, obj: obj.type == 'ARMATURE' 
     )
-
-    # bpy.types.Scene.lerp_rotation = bpy.props.FloatProperty( 
-    #     name="Lerp Rotation",
-    #     default=1.0,
-    #     min=0.0,
-    #     max=1.0,
-    #     subtype='FACTOR',
-    #     description="Lerp factor for rotation blending between source and target bones",
-    #     update=retarget_operators.callback_update_lerp_property)
 
     bpy.types.Scene.retarget_target_armature = bpy.props.PointerProperty( 
         type=bpy.types.Object,
@@ -115,7 +159,12 @@ def register():
         mod.register()
     register_retarget_properties()
 
+    if check_bone_selection_handler not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(check_bone_selection_handler)
+
 def unregister():
+    if check_bone_selection_handler in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(check_bone_selection_handler)
     unregister_retarget_properties()
 
     for mod in reversed(addon_modules):
