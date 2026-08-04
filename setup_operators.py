@@ -216,14 +216,13 @@ class RTGTR_OT_FinishRecord(Operator):
         item = context.scene.retarget_bones[context.scene.retarget_bones_active_index]
         pose_bone = armature_obj.pose.bones.get(item.target_name) # type: ignore
     
-
         current_rotation = pose_bone.rotation_quaternion # type: ignore
 
-        dif = scene.retarget_current_initial_rotation.rotation_difference(current_rotation) # type: ignore
+        dif = Quaternion(scene.retarget_current_initial_rotation).rotation_difference(current_rotation) # type: ignore
         item.corrective_offset = dif # type: ignore
         item.is_setup = True # type: ignore
         scene.retarget_is_recording = False # type: ignore
-        self.report({'INFO'}, f"Saved transforms for {data_bone.name}")
+        self.report({'INFO'}, f"Saved transforms for {pose_bone.name}")
         return {'FINISHED'}
 
 
