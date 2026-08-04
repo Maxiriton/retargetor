@@ -1,4 +1,4 @@
-# type: ignore
+# type : ignore
 """This module contains operator for kimodo retargeting"""
 import bpy
 from bpy.types import Operator
@@ -14,6 +14,58 @@ def get_items_by_target_name(collection, target_name):
     :return: List[BoneRetargetInfo]
     """
     return [item for item in collection if item.target_name == target_name]
+
+def snap_bone_rotation(context, bone_target_name, add_roll=True):
+    target_obj = context.scene.retarget_target_armature 
+    source_obj = context.scene.retarget_source_armature 
+    
+    if not target_obj or not source_obj:
+        raise ValueError("Les armatures source ou cible ne sont pas définies dans la scène.")
+        
+    tgt_bone = target_obj.data.bones.get(bone_target_name)
+    if not tgt_bone:
+        raise KeyError(f"L'os cible '{bone_target_name}' n'existe pas dans l'armature '{target_obj.name}'.")
+
+    matching_items = get_items_by_target_name(context.scene.retarget_bones, tgt_bone.name)
+    
+    if len(matching_items) == 0:
+        raise KeyError(f"Aucune correspondance trouvée dans 'retarget_bones' pour l'os cible '{tgt_bone.name}'.")
+    elif len(matching_items) > 1:
+        raise ValueError(f"Plusieurs correspondances ({len(matching_items)}) ont été trouvées pour l'os cible '{tgt_bone.name}'.")
+
+    item = matching_items[0]
+
+    # Vérification que l'os source existe dans la data de l'armature source
+    if item.src_name not in source_obj.data.bones:
+        raise KeyError(f"L'os source '{item.src_name}' n'existe pas dans l'armature source '{source_obj.name}'.")
+
+    src_bone = source_obj.data.bones[item.src_name]
+
+    src_pose_bone = source_obj.pose.bones.get(src_bone.name)
+    tgt_pose_bone = target_obj.pose.bones.get(tgt_bone.name)
+    
+    if not src_pose_bone or not tgt_pose_bone:
+        raise AttributeError("Impossible d'accéder aux PoseBones (vérifiez que les armatures sont valides).")
+    
+    tgt_pose_bone.rotation_mode = 'QUATERNION'
+    tgt_pose_bone.matrix = src_pose_bone.matrix
+    
+    if add_roll: 
+        q_correction = Quaternion()  # Quaternion Identité par défaut
+        
+        if item.offset_mode == 'ROLL':
+            q_correction = Quaternion(Vector((0.0, 1.0, 0.0)), item.roll_offset)
+        elif item.offset_mode == 'REST_OFFSET':
+            # Utilisation de rest_offset_quat si c'est le nom de ta FloatVectorProperty
+            q_correction = Quaternion(item.rest_offset)
+    
+        q_rot = tgt_pose_bone.rotation_quaternion
+        tgt_pose_bone.rotation_quaternion = q_rot @ q_correction
+    
+    tgt_pose_bone.location = Vector((0.0, 0.0, 0.0))  # Reset location
+
+    return True
+
 
 class RTGTR_SimpleRetarget(Operator):
     bl_idname = "retargetor.simple_retarget"
@@ -94,45 +146,73 @@ class RTGTR_snap_selected_bone(Operator):
     
     
     def execute(self, context):
-        target_obj = context.scene.retarget_target_armature 
-        source_obj = context.scene.retarget_source_armature 
-    
         tgt_bone = context.active_object.data.bones.active
-        matching_items = get_items_by_target_name(context.scene.retarget_bones, tgt_bone.name)
-
-        if len(matching_items) == 0:
-            self.report({'INFO'}, f"No matching bone for selected target")
-            return {'CANCELLED'}
-        elif len(matching_items) > 1:
-            self.report({'INFO'}, f"There are several bones that matches this one. This should not happen.")
-            return {'CANCELLED'}
+        try:
+            snap_bone_rotation(context, tgt_bone.name, add_roll=True)
+            self.report({'INFO'}, "Alignement réussi !")
+            return {'FINISHED'}
         
-
-        item = matching_items[0]
-        src_bone = context.scene.retarget_source_armature.data.bones[item.src_name]
-        print(f"Le bone actif est {tgt_bone.name} et le bone source est {src_bone.name}")
-
-        src_pose_bone = source_obj.pose.bones.get(src_bone.name)
-        tgt_pose_bone = target_obj.pose.bones.get(tgt_bone.name)
-
-        tgt_pose_bone.rotation_mode = 'QUATERNION'
-        tgt_pose_bone.matrix = src_pose_bone.matrix
+        except (KeyError, ValueError, AttributeError) as e:
+            self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
 
 
-        if self.add_roll: 
-            q_correction = Quaternion.identity
-            if item.offset_mode == 'ROLL':
-                q_correction = Quaternion(Vector((0.0,1.0,0.0)), item.roll_offset)
-            elif item.offset_mode == 'REST_OFFSET' :
-                q_correction = Quaternion(item.rest_offset)
+def snap_bone_hierarchy_recursive(context, bone, level=0):
+    """
+    Fonction récursive qui affiche un os et parcourt tous ses enfants.
+    """
+    # Création d'une indentation visuelle selon le niveau dans l'arbre
+    indent = "    " * level
+    prefix = "└── " if level > 0 else ""
+    
+    print(f"{indent}{prefix}{bone.name}")
+    try:
+        snap_bone_rotation(context, bone.name)
+    except (KeyError, ValueError, AttributeError) as e:
+        print(f"{e}")
+    
+    # Appel récursif pour chaque enfant de cet os
+    for child in bone.children:
+        snap_bone_hierarchy_recursive(context, child, level + 1)
+
+class RTGTR_snap_full_pose(Operator):
+    """Snap the full pose at the current frame"""
+    bl_idname = "retargetor.snap_full_pose"
+    bl_label = "Snap full pose"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    add_roll : BoolProperty(
+        name="Add roll rotation",
+        default=False
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.retarget_source_armature is not None and \
+               context.scene.retarget_target_armature is not None and \
+               context.mode == 'POSE' and \
+               context.active_object.name == context.scene.retarget_target_armature.name
+    
+    
+    def execute(self, context):
+        armature_obj =  context.scene.retarget_target_armature
+        bones = armature_obj.data.bones
         
-            q_rot = tgt_pose_bone.rotation_quaternion
-            tgt_pose_bone.rotation_quaternion = q_rot @ q_correction
+        root_bones = [b for b in bones if b.parent is None]
+        
+        if not root_bones:
+            self.report({'WARNING'}, f"L'armature '{armature_obj.name}' ne contient aucun os.")
+            return {'CANCELLED'}
 
+        for root in root_bones:
+            snap_bone_hierarchy_recursive(context, root)
+            
+        print("="*40 + "\n")
 
-        tgt_pose_bone.location = Vector((0.0, 0.0, 0.0))  # Reset location to avoid unwanted translation
-                
+        self.report({'INFO'}, "Hiérarchie affichée dans la console System (Window -> Toggle System Console)")
         return {'FINISHED'}
+
+       
 
     
 
@@ -141,6 +221,7 @@ class RTGTR_snap_selected_bone(Operator):
 classes = (
     RTGTR_SimpleRetarget,
     RTGTR_snap_selected_bone,
+    RTGTR_snap_full_pose,
 )
 
 def register():
