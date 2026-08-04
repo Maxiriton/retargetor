@@ -95,7 +95,7 @@ class BoneRetargetInfo(PropertyGroup):
     roll_offset: FloatProperty(name="Roll Offset", description="Rotation offset along target's local Y axis to match source coordinate system", subtype="ANGLE", default=0)
     is_setup: BoolProperty(name="Is Recorded", default=False)
     offset_mode: EnumProperty(items=offset_items, description="Select the offset to apply after aligning bones.")
-
+    corrective_offset : FloatVectorProperty(name="Corrective Offset", description="Additional corrective offset to apply after aligning bones.", size=4, default=(1.0, 0.0, 0.0, 0.0))
 
 def register_retarget_properties():
     """Register retargeting properties"""
@@ -106,10 +106,25 @@ def register_retarget_properties():
         description="A collection of all bones info"
     )
 
+
+
     bpy.types.Scene.retarget_bones_active_index = bpy.props.IntProperty(
         name="Bones Index",
         default=0,
         # update=setup_operators.on_shape_key_index_changed
+    )
+
+    bpy.types.Scene.retarget_is_recording = bpy.props.BoolProperty(
+        name="Is Recording",
+        default=False,
+        description="Indicates if the user is currently recording an adjustement rotation"
+    )
+
+    bpy.types.Scene.retarget_current_initial_rotation = bpy.props.FloatVectorProperty(
+        name="Initial Rotation",
+        description="Stores the initial rotation of the bone when recording starts",
+        size=4,
+        default=(1.0, 0.0, 0.0, 0.0)
     )
 
     bpy.types.Scene.last_active_bone_name = bpy.props.StringProperty(

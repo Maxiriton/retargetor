@@ -17,7 +17,6 @@ def update_target_bone(self, context):
     else:
         self.is_setup = False
 
-
 def compute_bone_offset(context, bone_source_name, bone_target_name):
     """Calculate the bone offset along the Y axis"""
     rot_src_edit_local = context.scene.retarget_source_armature.data.bones[bone_source_name].matrix_local.copy().to_3x3()
@@ -152,11 +151,9 @@ class RTGTR_import_retarget_json(Operator, ImportHelper):
         for item_data in data:
             new_item = collection.add()
             
-            # Utilisation de .get() pour éviter que ça plante si une clé est manquante dans le JSON
             new_item.src_name = item_data.get("src_name", "")
             new_item.target_name = item_data.get("target_name", "")
             
-            # Reconstruction du Quaternion/FloatVectorProperty
             rest_offset = item_data.get("rest_offset", [1.0, 0.0, 0.0, 0.0])
             if len(rest_offset) == 4:
                 new_item.rest_offset = Quaternion(rest_offset)
@@ -171,12 +168,72 @@ class RTGTR_import_retarget_json(Operator, ImportHelper):
         self.report({'INFO'}, f"Importation réussie ({len(data)} os importé(s))")
         return {'FINISHED'}
 
+class RTGTR_OT_RecordAdjustement(Operator):
+    """Record an extra rotation offset for the current selected bone"""
+    bl_idname = "retargetor.record_adjustement"
+    bl_label = "Record Adjustment"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        item = context.scene.retarget_bones[context.scene.retarget_bones_active_index]
+        return item and item.is_setup and context.active_object == context.scene.retarget_target_armature
+
+    def execute(self, context): # type: ignore
+        scene = context.scene
+        scene.retarget_is_recording = True # type: ignore
+        item = context.scene.retarget_bones[context.scene.retarget_bones_active_index]
+        armature_obj = context.active_object
+    
+        bpy.ops.object.mode_set(mode='POSE')
+        bone_name = item.target_name
+        data_bone = armature_obj.data.bones.get(bone_name)
+        pose_bone = armature_obj.pose.bones.get(bone_name)
+
+        armature_obj.data.bones.active = data_bone
+        bpy.ops.pose.select_all(action='DESELECT')
+        pose_bone.select = True
+
+        scene.retarget_current_initial_rotation = pose_bone.rotation_quaternion # type: ignore
+        print(f"Initial rotation for {data_bone.name} : {Quaternion(scene.retarget_current_initial_rotation).to_euler()}")
+
+        self.report({'INFO'}, f"Ready to record pose for {data_bone.name}")
+        return {'FINISHED'}
+
+class RTGTR_OT_FinishRecord(Operator):
+    """Store bone transforms for the current shape key"""
+    bl_idname = "retargetor.finish_record"
+    bl_label = "Finish Recording"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.retarget_is_recording and context.active_object == context.scene.retarget_target_armature
+
+    def execute(self, context): # type: ignore
+        scene = context.scene
+        armature_obj = scene.retarget_target_armature # type: ignore
+        item = context.scene.retarget_bones[context.scene.retarget_bones_active_index]
+        pose_bone = armature_obj.pose.bones.get(item.target_name) # type: ignore
+    
+
+        current_rotation = pose_bone.rotation_quaternion # type: ignore
+
+        dif = scene.retarget_current_initial_rotation.rotation_difference(current_rotation) # type: ignore
+        item.corrective_offset = dif # type: ignore
+        item.is_setup = True # type: ignore
+        scene.retarget_is_recording = False # type: ignore
+        self.report({'INFO'}, f"Saved transforms for {data_bone.name}")
+        return {'FINISHED'}
+
 
 ### Registration
 classes = (
     RTGTR_Setup_Bone_List,
     RTGTR_Record_to_json,
-    RTGTR_import_retarget_json
+    RTGTR_import_retarget_json,
+    RTGTR_OT_RecordAdjustement,
+    RTGTR_OT_FinishRecord
 )
 
 def register():
