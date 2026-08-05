@@ -208,19 +208,14 @@ class RTGTR_snap_full_pose(Operator):
             self.report({'WARNING'}, f"L'armature '{armature_obj.name}' ne contient aucun os.")
             return {'CANCELLED'}
 
-        all_snapped = False
-        iteration = 0
-        while not all_snapped:
-            before_rotations = {bone.name: bone.matrix for bone in pose_bones}
+
+        for iteration in range(self.repetitions):
             for root in root_bones:
                 snap_bone_hierarchy_recursive(context, root)
-            after_rotations = {bone.name: bone.matrix for bone in pose_bones}
-            all_snapped = all(before_rotations[bone.name] == after_rotations[bone.name] for bone in pose_bones)
-            print(f"Iteration {iteration}: All snapped? {all_snapped}")
             bpy.context.view_layer.update()
-            iteration += 1
 
-        self.report({'INFO'}, f"Snapping done for the full pose in {iteration} iterations.")
+
+        self.report({'INFO'}, f"Snapping done for the full pose in {self.repetitions} iterations.")
         return {'FINISHED'}
 
        
