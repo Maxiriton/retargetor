@@ -15,7 +15,7 @@ def get_items_by_target_name(collection, target_name):
     """
     return [item for item in collection if item.target_name == target_name]
 
-def snap_bone_rotation(context, bone_target_name, add_roll=True):
+def snap_bone_rotation(context, bone_target_name, add_roll=True, add_corrective_offset=True):
     target_obj = context.scene.retarget_target_armature 
     source_obj = context.scene.retarget_source_armature 
     
@@ -61,6 +61,11 @@ def snap_bone_rotation(context, bone_target_name, add_roll=True):
     
         q_rot = tgt_pose_bone.rotation_quaternion
         tgt_pose_bone.rotation_quaternion = q_rot @ q_correction
+
+    if add_corrective_offset and item.is_setup:
+        q_corrective = Quaternion(item.corrective_offset)  # Quaternion stocké dans l'item
+        q_rot = tgt_pose_bone.rotation_quaternion
+        tgt_pose_bone.rotation_quaternion = q_rot @ q_corrective
     
     tgt_pose_bone.location = Vector((0.0, 0.0, 0.0))  # Reset location
 
