@@ -55,36 +55,35 @@ class RETARGETOR_PT_RetargetPanel(Panel):
 
 class RTGTR_UL_Bones(UIList):
     """UI List for bones matching and setuping"""
-    def draw_item(self, context, layout, data, item, icon, active_data, active_property, index): # type: ignore
+    def draw_item(self, context, layout, data, item, icon, active_data, active_property, index):
         row = layout.row(align=True)
+        
         if context.scene.retarget_is_recording and context.scene.retarget_bones_active_index != index:
             row.enabled = False
 
-        split = row.split(factor=0.3)
-        c = split.column()
+        split1 = row.split(factor=0.33, align=True)
+        col1 = split1.column(align=True)
+        
         if item.is_setup:
-            c.label(text=item.src_name, icon='CHECKMARK')
+            col1.label(text=item.src_name, icon='CHECKMARK')
         else:
-            c.label(text=item.src_name, icon='DECORATE')
+            col1.label(text=item.src_name, icon='DECORATE')
 
-        split = split.split(factor=0.5)
-        c = split.column()
-        c.prop_search(
+        split2 = split1.split(factor=0.5, align=True)
+        col2 = split2.column(align=True)
+        
+        target_bones = context.scene.retarget_target_armature.pose if context.scene.retarget_target_armature else None
+        col2.prop_search(
             item,
             "target_name",
-            context.scene.retarget_target_armature.pose,
+            target_bones,
             "bones",
             text=""
         )
-        c = split.column()
-        row2 = c.row(align=True)
-        row2.prop(item, "offset_mode", text="")
-        # if item.offset_mode == 'ROLL':
-        #     row2.label(text=f"{item.roll_offset:0.2}°")
-        # elif item.offset_mode == 'REST_OFFSET':
-        #     vector = Quaternion(item.rest_offset).to_euler()
-        #     row2.label(text=f"{vector.x} - {vector.y} - {vector.z}")
 
+        col3 = split2.column(align=True)
+        row2 = col3.row(align=True)
+        row2.prop(item, "offset_mode", text="")
 
         if context.scene.retarget_is_recording and context.scene.retarget_bones_active_index == index:
             row2.operator(
@@ -92,10 +91,21 @@ class RTGTR_UL_Bones(UIList):
                 text="Finish Recording",
                 icon='REC'
             )
+        elif item.has_corrective_offset:
+            row2.operator(
+                "retargetor.record_adjustement",
+                text="Update Record",
+                icon='ARMATURE_DATA'
+            )
+            row2.operator(
+                "retargetor.clear_record",
+                text="",
+                icon='X'
+            )
         else:
             row2.operator(
                 "retargetor.record_adjustement",
-                text="Record Correction" if not item.is_setup else "Update Record ",
+                text="Record Correction",
                 icon='ARMATURE_DATA'
             )
 
