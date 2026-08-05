@@ -12,7 +12,7 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 
-# type : ignore
+#type: ignore
 
 bl_info = {
     "name": "Retargetor",
@@ -95,6 +95,7 @@ class BoneRetargetInfo(PropertyGroup):
     roll_offset: FloatProperty(name="Roll Offset", description="Rotation offset along target's local Y axis to match source coordinate system", subtype="ANGLE", default=0)
     is_setup: BoolProperty(name="Is Recorded", default=False)
     offset_mode: EnumProperty(items=offset_items, description="Select the offset to apply after aligning bones.")
+    has_corrective_offset: BoolProperty(name="Has Corrective Offset", description="Indicates if a corrective offset has been recorded for this bone.", default=False)
     corrective_offset : FloatVectorProperty(name="Corrective Offset", description="Additional corrective offset to apply after aligning bones.", size=4, default=(1.0, 0.0, 0.0, 0.0))
 
 def register_retarget_properties():
@@ -105,8 +106,6 @@ def register_retarget_properties():
         name="Retarget Bones",
         description="A collection of all bones info"
     )
-
-
 
     bpy.types.Scene.retarget_bones_active_index = bpy.props.IntProperty(
         name="Bones Index",

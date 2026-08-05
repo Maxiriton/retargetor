@@ -220,9 +220,28 @@ class RTGTR_OT_FinishRecord(Operator):
 
         dif = Quaternion(scene.retarget_current_initial_rotation).rotation_difference(current_rotation) # type: ignore
         item.corrective_offset = dif # type: ignore
-        item.is_setup = True # type: ignore
+        item.has_corrective_offset = True # type: ignore
         scene.retarget_is_recording = False # type: ignore
         self.report({'INFO'}, f"Saved transforms for {pose_bone.name}")
+        return {'FINISHED'}
+
+class RTGTR_OT_ClearRecord(Operator):
+    """Clear the corrective offset for the current selected bone"""
+    bl_idname = "retargetor.clear_record"
+    bl_label = "Clear Record"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        item = context.scene.retarget_bones[context.scene.retarget_bones_active_index]
+        return item and item.is_setup and context.active_object == context.scene.retarget_target_armature
+
+    def execute(self, context): # type: ignore
+        scene = context.scene
+        item = context.scene.retarget_bones[context.scene.retarget_bones_active_index]
+        item.corrective_offset = Quaternion((1.0, 0.0, 0.0, 0.0)) # type: ignore
+        item.has_corrective_offset = False # type: ignore
+        self.report({'INFO'}, f"Cleared corrective offset for {item.target_name}")
         return {'FINISHED'}
 
 
@@ -232,7 +251,8 @@ classes = (
     RTGTR_Record_to_json,
     RTGTR_import_retarget_json,
     RTGTR_OT_RecordAdjustement,
-    RTGTR_OT_FinishRecord
+    RTGTR_OT_FinishRecord,
+    RTGTR_OT_ClearRecord
 )
 
 def register():
