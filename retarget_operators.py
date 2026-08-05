@@ -2,7 +2,7 @@
 """This module contains operator for kimodo retargeting"""
 import bpy
 from bpy.types import Operator
-from bpy.props import BoolProperty
+from bpy.props import BoolProperty, IntProperty
 from mathutils import Quaternion, Vector
 
 def get_items_by_target_name(collection, target_name):
@@ -163,20 +163,13 @@ class RTGTR_snap_selected_bone(Operator):
 
 
 def snap_bone_hierarchy_recursive(context, bone, level=0):
-    """
-    Fonction récursive qui affiche un os et parcourt tous ses enfants.
-    """
-    # Création d'une indentation visuelle selon le niveau dans l'arbre
-    indent = "    " * level
-    prefix = "└── " if level > 0 else ""
+    """recursively snap the bone and its children"""
     
-    print(f"{indent}{prefix}{bone.name}")
     try:
         snap_bone_rotation(context, bone.name)
     except (KeyError, ValueError, AttributeError) as e:
         print(f"{e}")
     
-    # Appel récursif pour chaque enfant de cet os
     for child in bone.children:
         snap_bone_hierarchy_recursive(context, child, level + 1)
 
@@ -191,6 +184,12 @@ class RTGTR_snap_full_pose(Operator):
         default=False
     )
 
+    repetitions : IntProperty(
+        name="Repetitions",
+        default=5,
+        min=1
+    )
+
     @classmethod
     def poll(cls, context):
         return context.scene.retarget_source_armature is not None and \
@@ -201,20 +200,27 @@ class RTGTR_snap_full_pose(Operator):
     
     def execute(self, context):
         armature_obj =  context.scene.retarget_target_armature
-        bones = armature_obj.data.bones
-        
-        root_bones = [b for b in bones if b.parent is None]
-        
+        data_bones = armature_obj.data.bones
+        pose_bones = armature_obj.pose.bones
+      
+        root_bones = [b for b in data_bones if b.parent is None]
         if not root_bones:
             self.report({'WARNING'}, f"L'armature '{armature_obj.name}' ne contient aucun os.")
             return {'CANCELLED'}
 
-        for root in root_bones:
-            snap_bone_hierarchy_recursive(context, root)
-            
-        print("="*40 + "\n")
+        all_snapped = False
+        iteration = 0
+        while not all_snapped:
+            before_rotations = {bone.name: bone.matrix for bone in pose_bones}
+            for root in root_bones:
+                snap_bone_hierarchy_recursive(context, root)
+            after_rotations = {bone.name: bone.matrix for bone in pose_bones}
+            all_snapped = all(before_rotations[bone.name] == after_rotations[bone.name] for bone in pose_bones)
+            print(f"Iteration {iteration}: All snapped? {all_snapped}")
+            bpy.context.view_layer.update()
+            iteration += 1
 
-        self.report({'INFO'}, "Hiérarchie affichée dans la console System (Window -> Toggle System Console)")
+        self.report({'INFO'}, f"Snapping done for the full pose in {iteration} iterations.")
         return {'FINISHED'}
 
        
