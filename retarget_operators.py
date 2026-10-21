@@ -80,52 +80,28 @@ class RTGTR_SimpleRetarget(Operator):
 
     @classmethod
     def poll(cls, context):
-        return (context.scene.retarget_source_armature is not None and \
+        return context.scene.retarget_source_armature is not None and \
                context.scene.retarget_target_armature is not None and  \
-               context.scene.retarget_json_path != "") 
+               context.scene.retarget_json_path != ""
 
     def execute(self, context): 
         scene = context.scene
-
         target_obj = scene.retarget_target_armature 
-        source_obj = scene.retarget_source_armature 
-
+        
         start_frame = scene.frame_start 
         end_frame = scene.frame_end
     
         for frame in range(start_frame, end_frame + 1):
             scene.frame_set(frame)
-            for item in scene.retarget_bones:
-                if not item.is_setup :
-                    continue
- 
-                if item.target_name in ["mixamorig1:Hips"]:
-                    print('on ignore le hips')
-                    continue
+            snap_full_pose(context, add_roll=True, repetitions=5)
 
-                src_bone = source_obj.pose.bones.get(item.src_name)
-                tgt_bone = target_obj.pose.bones.get(item.target_name)
+            for bone in target_obj.pose.bones:
+                if "hips" in bone.name.lower():
+                    # Gestion de la translation pour les Hips / Root
+                    bone.keyframe_insert(data_path="location", frame=frame)
 
-                tgt_bone.rotation_mode = 'QUATERNION'
-                tgt_bone.matrix = src_bone.matrix
-
-                q_correction = Quaternion.identity
-                if item.offset_mode == 'ROLL':
-                    q_correction = Quaternion(Vector((0.0,1.0,0.0)), item.roll_offset)
-                elif item.offset_mode == 'REST_OFFSET' :
-                    q_correction = Quaternion(item.rest_offset)
-                
-                
-                q_rot = tgt_bone.rotation_quaternion
-                tgt_bone.rotation_quaternion = q_rot @ q_correction
-
-                tgt_bone.location = Vector((0.0, 0.0, 0.0))  # Reset location to avoid unwanted translation
-                
-                # Gestion de la translation pour les Hips / Root
-                if "hips" in item.target_name.lower() or "root" in item.target_name.lower():
-                    tgt_bone.keyframe_insert(data_path="location", frame=frame)
-                
-                tgt_bone.keyframe_insert(data_path="rotation_quaternion", frame=frame)
+                bone.keyframe_insert(data_path="rotation_quaternion", frame=frame)
+            
 
         self.report({'INFO'}, f"Reciblage réussi sur {end_frame - start_frame + 1} frames.")
         return {'FINISHED'}
@@ -173,6 +149,19 @@ def snap_bone_hierarchy_recursive(context, bone, level=0):
     for child in bone.children:
         snap_bone_hierarchy_recursive(context, child, level + 1)
 
+def snap_full_pose(context, add_roll=True, repetitions=5):
+    armature_obj =  context.scene.retarget_target_armature
+    data_bones = armature_obj.data.bones
+  
+    root_bones = [b for b in data_bones if b.parent is None]
+    if not root_bones:
+        raise ValueError(f"L'armature '{armature_obj.name}' ne contient aucun os.")
+
+    for iteration in range(repetitions):
+        for root in root_bones:
+            snap_bone_hierarchy_recursive(context, root)
+        bpy.context.view_layer.update()
+
 class RTGTR_snap_full_pose(Operator):
     """Snap the full pose at the current frame"""
     bl_idname = "retargetor.snap_full_pose"
@@ -199,21 +188,11 @@ class RTGTR_snap_full_pose(Operator):
     
     
     def execute(self, context):
-        armature_obj =  context.scene.retarget_target_armature
-        data_bones = armature_obj.data.bones
-        pose_bones = armature_obj.pose.bones
-      
-        root_bones = [b for b in data_bones if b.parent is None]
-        if not root_bones:
-            self.report({'WARNING'}, f"L'armature '{armature_obj.name}' ne contient aucun os.")
+        try:
+            snap_full_pose(context, add_roll=self.add_roll, repetitions=self.repetitions)
+        except ValueError as e:
+            self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
-
-
-        for iteration in range(self.repetitions):
-            for root in root_bones:
-                snap_bone_hierarchy_recursive(context, root)
-            bpy.context.view_layer.update()
-
 
         self.report({'INFO'}, f"Snapping done for the full pose in {self.repetitions} iterations.")
         return {'FINISHED'}
