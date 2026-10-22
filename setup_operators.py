@@ -215,11 +215,11 @@ class RTGTR_OT_AutoTranslationScale(Operator):
     def execute(self, context):
         result = update_translation_scale(context)
         if result is None:
-            self.report({'WARNING'}, "Impossible de mesurer les hauteurs : il faut au moins 2 os mappés à des hauteurs différentes.")
+            self.report({'WARNING'}, "Unable to measure the heights: at least 2 mapped bones at different heights are needed.")
             return {'CANCELLED'}
 
         scale, source_height, target_height = result
-        self.report({'INFO'}, f"Translation scale = {scale:.4f} (hauteur source {source_height:.3f} m, cible {target_height:.3f} m)")
+        self.report({'INFO'}, f"Translation scale = {scale:.4f} (source height {source_height:.3f} m, target height {target_height:.3f} m)")
         return {'FINISHED'}
 
 
@@ -260,16 +260,16 @@ class RTGTR_Record_to_json(Operator, ExportHelper):
             with open(self.filepath, 'w', encoding='utf-8') as f:
                 json.dump(collection_data, f, indent=4)
 
-            self.report({'INFO'}, f"Export Successfull : {self.filepath}")
+            self.report({'INFO'}, f"Export successful: {self.filepath}")
             return {'FINISHED'}
 
         except Exception as e:
-            self.report({'ERROR'}, f"Export failed : {str(e)}")
+            self.report({'ERROR'}, f"Export failed: {str(e)}")
             return {'CANCELLED'}
 
 
 class RTGTR_import_retarget_json(Operator, ImportHelper):
-    """Importe la configuration de reciblage depuis un fichier JSON"""
+    """Import the retarget setup from a JSON file"""
 
     bl_idname = "retargetor.import_retarget_json"
     bl_label = "Import from JSON"
@@ -290,11 +290,11 @@ class RTGTR_import_retarget_json(Operator, ImportHelper):
             with open(self.filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         except Exception as e:
-            self.report({'ERROR'}, f"Impossible de lire le fichier : {str(e)}")
+            self.report({'ERROR'}, f"Unable to read the file: {str(e)}")
             return {'CANCELLED'}
 
         if not isinstance(data, list):
-            self.report({'ERROR'}, "Le fichier JSON n'est pas au bon format (une liste d'éléments est attendue)")
+            self.report({'ERROR'}, "The JSON file has the wrong format (a list of items is expected)")
             return {'CANCELLED'}
 
         collection = scene.retarget_bones
@@ -343,9 +343,9 @@ class RTGTR_import_retarget_json(Operator, ImportHelper):
         if armatures_ready:
             # The scale isn't stored in the JSON: it comes from the two rigs of the current scene
             update_translation_scale(context)
-            self.report({'INFO'}, f"Importation réussie ({len(data)} os, offsets recalculés pour {recomputed})")
+            self.report({'INFO'}, f"Import successful ({len(data)} bones, offsets recomputed for {recomputed})")
         else:
-            self.report({'INFO'}, f"Importation réussie ({len(data)} os). Armatures non définies : offsets du fichier conservés")
+            self.report({'INFO'}, f"Import successful ({len(data)} bones). Armatures not set: offsets from the file were kept")
         return {'FINISHED'}
 
 
@@ -370,7 +370,7 @@ class RTGTR_OT_RecordAdjustement(Operator):
         data_bone = armature_obj.data.bones.get(item.target_name)
         pose_bone = armature_obj.pose.bones.get(item.target_name)
         if data_bone is None or pose_bone is None:
-            self.report({'ERROR'}, f"L'os cible '{item.target_name}' est introuvable.")
+            self.report({'ERROR'}, f"The target bone '{item.target_name}' was not found.")
             return {'CANCELLED'}
 
         armature_obj.data.bones.active = data_bone
@@ -401,12 +401,12 @@ class RTGTR_OT_FinishRecord(Operator):
         armature_obj = scene.retarget_target_armature
         item = get_active_item(context)
         if item is None:
-            self.report({'ERROR'}, "Aucun os actif dans la liste.")
+            self.report({'ERROR'}, "No active bone in the list.")
             return {'CANCELLED'}
 
         pose_bone = armature_obj.pose.bones.get(item.target_name)
         if pose_bone is None:
-            self.report({'ERROR'}, f"L'os cible '{item.target_name}' est introuvable.")
+            self.report({'ERROR'}, f"The target bone '{item.target_name}' was not found.")
             return {'CANCELLED'}
 
         initial = Quaternion(scene.retarget_current_initial_rotation)

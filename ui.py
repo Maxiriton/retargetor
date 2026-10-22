@@ -43,19 +43,19 @@ class RETARGETOR_PT_RetargetPanel(Panel):
                 scene, "retarget_bones",
                 scene, "retarget_bones_active_index"
             )
-            layout.operator('retargetor.export_setup_to_json', text="Export to json")
+            layout.operator('retargetor.export_setup_to_json', text="Export to JSON")
 
 
         layout.separator()
         layout.label(text="Retarget", icon='ARMATURE_DATA')
 
-        # Bouton pour lancer l'action
+        # Retarget and snap buttons
         layout.operator("retargetor.simple_retarget", icon='ANIM_DATA')
         layout.operator("retargetor.snap_selected_bone", icon='ANIM_DATA')
         layout.operator("retargetor.snap_full_pose", icon='ANIM_DATA')
 
 class RTGTR_UL_Bones(UIList):
-    """UI List for bones matching and setuping"""
+    """UI list for matching and setting up bones"""
     def draw_item(self, context, layout, data, item, icon, active_data, active_property, index):
         row = layout.row(align=True)
 

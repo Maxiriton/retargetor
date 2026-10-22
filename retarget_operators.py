@@ -19,7 +19,7 @@ def build_target_map(scene):
 
     if duplicates:
         raise ValueError(
-            "Plusieurs os source pointent vers le même os cible : " + ", ".join(sorted(duplicates))
+            "Several source bones point to the same target bone: " + ", ".join(sorted(duplicates))
         )
     return mapping
 
@@ -38,7 +38,7 @@ def scaled_target_location(scene, item, src_pose_bone, tgt_pose_bone):
     src_rest_bone = source_obj.data.bones.get(item.src_name)
     tgt_rest_bone = target_obj.data.bones.get(tgt_pose_bone.name)
     if src_rest_bone is None or tgt_rest_bone is None:
-        raise KeyError(f"Os de repos introuvable pour la paire '{item.src_name}' / '{tgt_pose_bone.name}'.")
+        raise KeyError(f"Rest bone not found for the pair '{item.src_name}' / '{tgt_pose_bone.name}'.")
 
     src_rest_world = source_obj.matrix_world @ src_rest_bone.head_local
     src_now_world = source_obj.matrix_world @ src_pose_bone.head
@@ -54,22 +54,22 @@ def snap_bone_rotation(context, bone_target_name, add_roll=True, add_corrective_
     source_obj = scene.retarget_source_armature
 
     if not target_obj or not source_obj:
-        raise ValueError("Les armatures source ou cible ne sont pas définies dans la scène.")
+        raise ValueError("The source or target armature is not set in the scene.")
 
     tgt_pose_bone = target_obj.pose.bones.get(bone_target_name)
     if tgt_pose_bone is None:
-        raise KeyError(f"L'os cible '{bone_target_name}' n'existe pas dans l'armature '{target_obj.name}'.")
+        raise KeyError(f"The target bone '{bone_target_name}' does not exist in the armature '{target_obj.name}'.")
 
     if mapping is None:
         mapping = build_target_map(scene)
 
     item = mapping.get(bone_target_name)
     if item is None:
-        raise KeyError(f"Aucune correspondance trouvée dans 'retarget_bones' pour l'os cible '{bone_target_name}'.")
+        raise KeyError(f"No match found in 'retarget_bones' for the target bone '{bone_target_name}'.")
 
     src_pose_bone = source_obj.pose.bones.get(item.src_name)
     if src_pose_bone is None:
-        raise KeyError(f"L'os source '{item.src_name}' n'existe pas dans l'armature source '{source_obj.name}'.")
+        raise KeyError(f"The source bone '{item.src_name}' does not exist in the source armature '{source_obj.name}'.")
 
     # Source pose expressed in the target armature space (object transforms included).
     # The scale is dropped: only the position and the orientation are copied.
@@ -139,7 +139,7 @@ def snap_full_pose(context, add_roll=True, repetitions=5, mapping=None):
 
     root_bones = [b for b in armature_obj.data.bones if b.parent is None]
     if not root_bones:
-        raise ValueError(f"L'armature '{armature_obj.name}' ne contient aucun os.")
+        raise ValueError(f"The armature '{armature_obj.name}' contains no bones.")
 
     errors = set()
     for _iteration in range(repetitions):
@@ -153,7 +153,7 @@ def snap_full_pose(context, add_roll=True, repetitions=5, mapping=None):
 
 def report_snap_errors(operator, errors):
     if errors:
-        operator.report({'WARNING'}, f"{len(errors)} erreur(s) pendant le snap, par exemple : {sorted(errors)[0]}")
+        operator.report({'WARNING'}, f"{len(errors)} error(s) while snapping, for example: {sorted(errors)[0]}")
 
 
 class RTGTR_SimpleRetarget(Operator):
@@ -207,7 +207,7 @@ class RTGTR_SimpleRetarget(Operator):
             scene.frame_set(original_frame)
 
         report_snap_errors(self, errors)
-        self.report({'INFO'}, f"Reciblage réussi sur {end_frame - start_frame + 1} frames.")
+        self.report({'INFO'}, f"Retargeting done on {end_frame - start_frame + 1} frames.")
         return {'FINISHED'}
 
 
@@ -234,12 +234,12 @@ class RTGTR_snap_selected_bone(Operator):
     def execute(self, context):
         tgt_bone = context.active_object.data.bones.active
         if tgt_bone is None:
-            self.report({'ERROR'}, "Aucun os actif.")
+            self.report({'ERROR'}, "No active bone.")
             return {'CANCELLED'}
 
         try:
             snap_bone_rotation(context, tgt_bone.name, add_roll=self.add_roll)
-            self.report({'INFO'}, "Alignement réussi !")
+            self.report({'INFO'}, "Snap done!")
             return {'FINISHED'}
 
         except (KeyError, ValueError, AttributeError) as e:

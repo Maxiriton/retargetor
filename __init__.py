@@ -5,7 +5,7 @@
 #
 # This program is distributed in the hope that it will be useful, but
 # WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTIBILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 # General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
@@ -117,7 +117,7 @@ def register_retarget_properties():
     bpy.types.Scene.retarget_is_recording = bpy.props.BoolProperty(
         name="Is Recording",
         default=False,
-        description="Indicates if the user is currently recording an adjustement rotation"
+        description="Indicates if the user is currently recording an adjustment rotation"
     )
 
     bpy.types.Scene.retarget_current_initial_rotation = bpy.props.FloatVectorProperty(
