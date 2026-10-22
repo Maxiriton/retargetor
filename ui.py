@@ -1,7 +1,6 @@
 # type: ignore
 import bpy
 from bpy.types import Panel, UIList
-from mathutils import Quaternion
 
 class RETARGETOR_PT_RetargetPanel(Panel):
     bl_label = "Retarget"
@@ -19,10 +18,9 @@ class RETARGETOR_PT_RetargetPanel(Panel):
         box = layout.box()
         box.prop(scene, "retarget_source_armature", text="Source")
         box.prop(scene, "retarget_target_armature", text="Target")
-        box.prop(scene, "retarget_json_path", text="Lien JSON")
 
         if len(context.scene.retarget_bones) == 0 :
-            layout.label(text='Il va falloir remplir ca')
+            layout.label(text="Bone list is empty: build it or import a JSON")
             row = layout.row(align=True)
             s = row.split(factor=0.7)
             s.operator("retargetor.setup_bone_list")
@@ -51,19 +49,18 @@ class RETARGETOR_PT_RetargetPanel(Panel):
         layout.operator("retargetor.simple_retarget", icon='ANIM_DATA')
         layout.operator("retargetor.snap_selected_bone", icon='ANIM_DATA')
         layout.operator("retargetor.snap_full_pose", icon='ANIM_DATA')
-        # layout.prop(scene, "lerp_rotation", text="Lerp Rotation")
 
 class RTGTR_UL_Bones(UIList):
     """UI List for bones matching and setuping"""
     def draw_item(self, context, layout, data, item, icon, active_data, active_property, index):
         row = layout.row(align=True)
-        
+
         if context.scene.retarget_is_recording and context.scene.retarget_bones_active_index != index:
             row.enabled = False
 
         split1 = row.split(factor=0.33, align=True)
         col1 = split1.column(align=True)
-        
+
         if item.is_setup:
             col1.label(text=item.src_name, icon='CHECKMARK')
         else:
@@ -71,18 +68,22 @@ class RTGTR_UL_Bones(UIList):
 
         split2 = split1.split(factor=0.5, align=True)
         col2 = split2.column(align=True)
-        
-        target_bones = context.scene.retarget_target_armature.pose if context.scene.retarget_target_armature else None
-        col2.prop_search(
-            item,
-            "target_name",
-            target_bones,
-            "bones",
-            text=""
-        )
+
+        target_obj = context.scene.retarget_target_armature
+        if target_obj:
+            col2.prop_search(
+                item,
+                "target_name",
+                target_obj.pose,
+                "bones",
+                text=""
+            )
+        else:
+            col2.label(text=item.target_name)
 
         col3 = split2.column(align=True)
         row2 = col3.row(align=True)
+        row2.prop(item, "use_translation", text="", icon='CON_LOCLIKE', toggle=True)
         row2.prop(item, "offset_mode", text="")
 
         if context.scene.retarget_is_recording and context.scene.retarget_bones_active_index == index:

@@ -1,45 +1,124 @@
 # type: ignore
-import bpy
+"""Operators and helpers used to set up the bone matching between source and target armatures"""
 import json
 import math
+from contextlib import contextmanager
+
+import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 from mathutils import Vector, Quaternion
 
+IDENTITY_QUATERNION = (1.0, 0.0, 0.0, 0.0)
+VALID_OFFSET_MODES = {'ROLL', 'REST_OFFSET'}
+INTERNAL_BONE_PREFIXES = ("mch-", "def-", "org-")
+
+# While True, update_target_bone does nothing (used when the list is filled from code)
+_target_update_suspended = False
+
+
+@contextmanager
+def suspended_target_update():
+    """Temporarily disable the update callback of BoneRetargetInfo.target_name"""
+    global _target_update_suspended
+    previous = _target_update_suspended
+    _target_update_suspended = True
+    try:
+        yield
+    finally:
+        _target_update_suspended = previous
+
+
+def get_active_item(context):
+    """Return the active BoneRetargetInfo, or None if the list is empty or the index is invalid"""
+    scene = context.scene
+    index = scene.retarget_bones_active_index
+    if 0 <= index < len(scene.retarget_bones):
+        return scene.retarget_bones[index]
+    return None
+
+
+def get_rest_rotations(context, bone_source_name, bone_target_name):
+    """World-space rest orientations (scale ignored) of a source/target bone pair.
+    Returns None if one of the armatures or bones can't be found."""
+    scene = context.scene
+    source_obj = scene.retarget_source_armature
+    target_obj = scene.retarget_target_armature
+    if not source_obj or not target_obj:
+        return None
+
+    src_bone = source_obj.data.bones.get(bone_source_name)
+    tgt_bone = target_obj.data.bones.get(bone_target_name)
+    if src_bone is None or tgt_bone is None:
+        return None
+
+    q_src = (source_obj.matrix_world @ src_bone.matrix_local).to_quaternion()
+    q_tgt = (target_obj.matrix_world @ tgt_bone.matrix_local).to_quaternion()
+    return q_src, q_tgt
+
+
+def compute_item_offsets(context, item):
+    """Compute roll_offset and rest_offset of an item from the rest poses of its two bones.
+    Returns True if the offsets could be computed."""
+    rotations = get_rest_rotations(context, item.src_name, item.target_name)
+    if rotations is None:
+        return False
+    q_src, q_tgt = rotations
+
+    # Roll: angle around the target's local Y axis, from the source's X axis expressed in the target's local space
+    x_src_in_tgt_local = q_tgt.inverted() @ (q_src @ Vector((1.0, 0.0, 0.0)))
+    item.roll_offset = math.atan2(x_src_in_tgt_local.z, x_src_in_tgt_local.x)
+
+    # Rest offset: rotation difference between the two bones in their rest pose
+    item.rest_offset = q_src.rotation_difference(q_tgt)
+    item.is_setup = True
+    return True
+
+
 def update_target_bone(self, context):
-    """Callback function call when a user setup a match for bone source/target"""
-    if self.target_name:
-        self.roll_offset = compute_bone_offset(context, self.src_name, self.target_name)
-        self.rest_offset = compute_rest_offset(context, self.src_name, self.target_name)
-        self.is_setup = True
+    """Callback called when a user sets up a match for a source/target bone"""
+    if _target_update_suspended:
+        return
+
+    # A different target makes any recorded correction meaningless
+    self.has_corrective_offset = False
+    self.corrective_offset = IDENTITY_QUATERNION
+
+    if self.target_name and compute_item_offsets(context, self):
         print(f"New offset computed : {Quaternion(self.rest_offset).to_euler()} | New roll computed : {self.roll_offset}")
-    else:
-        self.is_setup = False
+        return
 
-def compute_bone_offset(context, bone_source_name, bone_target_name):
-    """Calculate the bone offset along the Y axis"""
-    rot_src_edit_local = context.scene.retarget_source_armature.data.bones[bone_source_name].matrix_local.copy().to_3x3()
-    rot_tgt_edit_local = context.scene.retarget_target_armature.data.bones[bone_target_name].matrix_local.copy().to_3x3()
+    self.is_setup = False
+    self.roll_offset = 0.0
+    self.rest_offset = IDENTITY_QUATERNION
 
-    x_src = rot_src_edit_local @ Vector((1.0,0.0,0.0))
-    x_src_in_tgt_local = rot_tgt_edit_local.inverted() @ x_src
-    return math.atan2(x_src_in_tgt_local.z, x_src_in_tgt_local.x)
 
-def compute_rest_offset(context, bone_source_name, bone_target_name):
-    """Get the rotation difference between the two bones"""
-    rot_src = context.scene.retarget_source_armature.data.bones[bone_source_name].matrix_local.copy().to_quaternion()
-    rot_tgt = context.scene.retarget_target_armature.data.bones[bone_target_name].matrix_local.copy().to_quaternion()
-    return rot_src.rotation_difference(rot_tgt)
+def find_bone_in_target(context, source_bone_name, exclude=()):
+    """Find the bone of the target armature that best matches a source bone name.
+    An exact (case-insensitive) match wins, then a partial match. Bones listed in `exclude` are ignored."""
+    target_obj = context.scene.retarget_target_armature
+    if not target_obj:
+        return ""
 
-def find_bone_in_target(context, target_bone_name):
-    """ Find a bone in the target armature"""
-    tg_name = target_bone_name.lower()
-    for bone in context.scene.retarget_target_armature.pose.bones:
-        name = bone.name.lower()
-        if name in tg_name or tg_name in name:
-            return bone.name
-    return ""
+    wanted = source_bone_name.lower()
+    candidates = [bone.name for bone in target_obj.pose.bones if bone.name not in exclude]
+
+    for name in candidates:
+        if name.lower() == wanted:
+            return name
+
+    partial = [
+        name for name in candidates
+        if wanted in name.lower() or (len(name) >= 3 and name.lower() in wanted)
+    ]
+    if not partial:
+        return ""
+
+    # Prefer deform/control bones over internal ones (MCH-, DEF-, ORG-), then the shortest name
+    partial.sort(key=lambda name: (name.lower().startswith(INTERNAL_BONE_PREFIXES), len(name)))
+    return partial[0]
+
 
 class RTGTR_Setup_Bone_List(Operator):
     bl_idname = "retargetor.setup_bone_list"
@@ -49,33 +128,37 @@ class RTGTR_Setup_Bone_List(Operator):
     @classmethod
     def poll(cls, context):
         return context.scene.retarget_source_armature is not None and \
-               context.scene.retarget_target_armature is not None 
-    
+               context.scene.retarget_target_armature is not None
+
     def execute(self, context):
         scene = context.scene
         scene.retarget_bones.clear()
+        scene.retarget_bones_active_index = 0
+        scene.retarget_is_recording = False
 
-        target_obj = scene.retarget_target_armature 
         source_obj = scene.retarget_source_armature
+        used_targets = set()
 
-        for bone in source_obj.pose.bones:
-            rtg_item = scene.retarget_bones.add()
-            rtg_item.src_name = bone.name
+        with suspended_target_update():
+            for bone in source_obj.pose.bones:
+                rtg_item = scene.retarget_bones.add()
+                rtg_item.src_name = bone.name
 
-            #we try to find the matching bones in target_armature (based on names only)
-            print(f"on va chercher la target pour {bone.name}")
-            rtg_item.target_name = find_bone_in_target(context, bone.name)
-            if rtg_item.target_name: 
-                rtg_item.roll_offset = compute_bone_offset(context, rtg_item.src_name, rtg_item.target_name)
-                rtg_item.rest_offset = compute_rest_offset(context, rtg_item.src_name, rtg_item.target_name)
-                rtg_item.is_setup = True
+                # Try to find the matching bone in the target armature (names only).
+                # A target bone is never used twice.
+                target_name = find_bone_in_target(context, bone.name, exclude=used_targets)
+                rtg_item.target_name = target_name
+                if target_name:
+                    used_targets.add(target_name)
+                    compute_item_offsets(context, rtg_item)
 
         self.report({'INFO'}, f"Found {len(scene.retarget_bones)} bones")
         return {'FINISHED'}
-    
+
+
 class RTGTR_Record_to_json(Operator, ExportHelper):
     """Export retarget setup to json"""
-    
+
     bl_idname = "retargetor.export_setup_to_json"
     bl_label = "Export to JSON"
     bl_options = {'REGISTER', 'UNDO'}
@@ -90,34 +173,37 @@ class RTGTR_Record_to_json(Operator, ExportHelper):
 
     def execute(self, context):
         scene = context.scene
-        
+
         collection_data = []
         for item in scene.retarget_bones:
             data = {
                 "src_name": item.src_name,
                 "target_name": item.target_name,
-                # Conversion du FloatVectorProperty (Quaternion size=4) en liste de floats
                 "rest_offset": list(item.rest_offset),
                 "roll_offset": item.roll_offset,
                 "is_setup": item.is_setup,
+                "use_translation": item.use_translation,
                 "offset_mode": item.offset_mode,
+                "has_corrective_offset": item.has_corrective_offset,
+                "corrective_offset": list(item.corrective_offset),
             }
             collection_data.append(data)
 
         try:
             with open(self.filepath, 'w', encoding='utf-8') as f:
                 json.dump(collection_data, f, indent=4)
-                
+
             self.report({'INFO'}, f"Export Successfull : {self.filepath}")
             return {'FINISHED'}
-            
+
         except Exception as e:
             self.report({'ERROR'}, f"Export failed : {str(e)}")
             return {'CANCELLED'}
 
+
 class RTGTR_import_retarget_json(Operator, ImportHelper):
     """Importe la configuration de reciblage depuis un fichier JSON"""
-    
+
     bl_idname = "retargetor.import_retarget_json"
     bl_label = "Import from JSON"
     bl_options = {'REGISTER', 'UNDO'}
@@ -132,7 +218,7 @@ class RTGTR_import_retarget_json(Operator, ImportHelper):
 
     def execute(self, context):
         scene = context.scene
-        
+
         try:
             with open(self.filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -145,28 +231,54 @@ class RTGTR_import_retarget_json(Operator, ImportHelper):
             return {'CANCELLED'}
 
         collection = scene.retarget_bones
-        
         collection.clear()
+        scene.retarget_bones_active_index = 0
+        scene.retarget_is_recording = False
 
-        for item_data in data:
-            new_item = collection.add()
-            
-            new_item.src_name = item_data.get("src_name", "")
-            new_item.target_name = item_data.get("target_name", "")
-            
-            rest_offset = item_data.get("rest_offset", [1.0, 0.0, 0.0, 0.0])
-            if len(rest_offset) == 4:
-                new_item.rest_offset = Quaternion(rest_offset)
-                
-            new_item.roll_offset = item_data.get("roll_offset", 0.0)
-            new_item.is_setup = item_data.get("is_setup", False)
-            
-            # Pour l'enum, on vérifie qu'on injecte bien une valeur valide
-            if "offset_mode" in item_data:
-                new_item.offset_mode = item_data["offset_mode"]
+        # The update callback is suspended: values come from the file, not from a user edit
+        with suspended_target_update():
+            for item_data in data:
+                new_item = collection.add()
 
-        self.report({'INFO'}, f"Importation réussie ({len(data)} os importé(s))")
+                new_item.src_name = item_data.get("src_name", "")
+                new_item.target_name = item_data.get("target_name", "")
+
+                rest_offset = item_data.get("rest_offset", list(IDENTITY_QUATERNION))
+                if len(rest_offset) == 4:
+                    new_item.rest_offset = rest_offset
+
+                new_item.roll_offset = item_data.get("roll_offset", 0.0)
+                new_item.is_setup = item_data.get("is_setup", False)
+                # Files exported by older versions don't contain it: no translation by default
+                new_item.use_translation = item_data.get("use_translation", False)
+
+                if item_data.get("offset_mode") in VALID_OFFSET_MODES:
+                    new_item.offset_mode = item_data["offset_mode"]
+
+                # Files exported by older versions don't contain the corrective offset
+                corrective_offset = item_data.get("corrective_offset", list(IDENTITY_QUATERNION))
+                if len(corrective_offset) == 4:
+                    new_item.corrective_offset = corrective_offset
+                new_item.has_corrective_offset = item_data.get("has_corrective_offset", False)
+
+        # Offsets only depend on the two rigs: when both armatures are set, recompute them
+        # so they are always consistent with the current scene.
+        armatures_ready = scene.retarget_source_armature is not None and \
+                          scene.retarget_target_armature is not None
+        recomputed = 0
+        if armatures_ready:
+            for item in collection:
+                if item.target_name and compute_item_offsets(context, item):
+                    recomputed += 1
+                else:
+                    item.is_setup = False
+
+        if armatures_ready:
+            self.report({'INFO'}, f"Importation réussie ({len(data)} os, offsets recalculés pour {recomputed})")
+        else:
+            self.report({'INFO'}, f"Importation réussie ({len(data)} os). Armatures non définies : offsets du fichier conservés")
         return {'FINISHED'}
+
 
 class RTGTR_OT_RecordAdjustement(Operator):
     """Record an extra rotation offset for the current selected bone"""
@@ -176,54 +288,70 @@ class RTGTR_OT_RecordAdjustement(Operator):
 
     @classmethod
     def poll(cls, context):
-        item = context.scene.retarget_bones[context.scene.retarget_bones_active_index]
-        return item and item.is_setup and context.active_object == context.scene.retarget_target_armature
+        item = get_active_item(context)
+        return item is not None and item.is_setup and \
+               context.active_object == context.scene.retarget_target_armature
 
-    def execute(self, context): # type: ignore
+    def execute(self, context):
         scene = context.scene
-        scene.retarget_is_recording = True # type: ignore
-        item = context.scene.retarget_bones[context.scene.retarget_bones_active_index]
+        item = get_active_item(context)
         armature_obj = context.active_object
-    
+
         bpy.ops.object.mode_set(mode='POSE')
-        bone_name = item.target_name
-        data_bone = armature_obj.data.bones.get(bone_name)
-        pose_bone = armature_obj.pose.bones.get(bone_name)
+        data_bone = armature_obj.data.bones.get(item.target_name)
+        pose_bone = armature_obj.pose.bones.get(item.target_name)
+        if data_bone is None or pose_bone is None:
+            self.report({'ERROR'}, f"L'os cible '{item.target_name}' est introuvable.")
+            return {'CANCELLED'}
 
         armature_obj.data.bones.active = data_bone
         bpy.ops.pose.select_all(action='DESELECT')
         pose_bone.select = True
+        pose_bone.rotation_mode = 'QUATERNION'
 
-        scene.retarget_current_initial_rotation = pose_bone.rotation_quaternion # type: ignore
-        print(f"Initial rotation for {data_bone.name} : {Quaternion(scene.retarget_current_initial_rotation).to_euler()}")
+        scene.retarget_current_initial_rotation = pose_bone.rotation_quaternion
+        scene.retarget_is_recording = True
 
         self.report({'INFO'}, f"Ready to record pose for {data_bone.name}")
         return {'FINISHED'}
 
+
 class RTGTR_OT_FinishRecord(Operator):
-    """Store bone transforms for the current shape key"""
+    """Store the corrective rotation for the current selected bone"""
     bl_idname = "retargetor.finish_record"
     bl_label = "Finish Recording"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
     def poll(cls, context):
-        return context.scene.retarget_is_recording and context.active_object == context.scene.retarget_target_armature
+        return context.scene.retarget_is_recording and \
+               context.active_object == context.scene.retarget_target_armature
 
-    def execute(self, context): # type: ignore
+    def execute(self, context):
         scene = context.scene
-        armature_obj = scene.retarget_target_armature # type: ignore
-        item = context.scene.retarget_bones[context.scene.retarget_bones_active_index]
-        pose_bone = armature_obj.pose.bones.get(item.target_name) # type: ignore
-    
-        current_rotation = pose_bone.rotation_quaternion # type: ignore
+        armature_obj = scene.retarget_target_armature
+        item = get_active_item(context)
+        if item is None:
+            self.report({'ERROR'}, "Aucun os actif dans la liste.")
+            return {'CANCELLED'}
 
-        dif = Quaternion(scene.retarget_current_initial_rotation).rotation_difference(current_rotation) # type: ignore
-        item.corrective_offset = dif # type: ignore
-        item.has_corrective_offset = True # type: ignore
-        scene.retarget_is_recording = False # type: ignore
+        pose_bone = armature_obj.pose.bones.get(item.target_name)
+        if pose_bone is None:
+            self.report({'ERROR'}, f"L'os cible '{item.target_name}' est introuvable.")
+            return {'CANCELLED'}
+
+        initial = Quaternion(scene.retarget_current_initial_rotation)
+        difference = initial.rotation_difference(pose_bone.rotation_quaternion)
+
+        # The initial pose was snapped with the previous correction already applied:
+        # the new correction is added on top of it instead of replacing it.
+        previous = Quaternion(item.corrective_offset) if item.has_corrective_offset else Quaternion()
+        item.corrective_offset = previous @ difference
+        item.has_corrective_offset = True
+        scene.retarget_is_recording = False
         self.report({'INFO'}, f"Saved transforms for {pose_bone.name}")
         return {'FINISHED'}
+
 
 class RTGTR_OT_ClearRecord(Operator):
     """Clear the corrective offset for the current selected bone"""
@@ -233,14 +361,14 @@ class RTGTR_OT_ClearRecord(Operator):
 
     @classmethod
     def poll(cls, context):
-        item = context.scene.retarget_bones[context.scene.retarget_bones_active_index]
-        return item and item.is_setup and context.active_object == context.scene.retarget_target_armature
+        item = get_active_item(context)
+        return item is not None and item.is_setup and \
+               context.active_object == context.scene.retarget_target_armature
 
-    def execute(self, context): # type: ignore
-        scene = context.scene
-        item = context.scene.retarget_bones[context.scene.retarget_bones_active_index]
-        item.corrective_offset = Quaternion((1.0, 0.0, 0.0, 0.0)) # type: ignore
-        item.has_corrective_offset = False # type: ignore
+    def execute(self, context):
+        item = get_active_item(context)
+        item.corrective_offset = IDENTITY_QUATERNION
+        item.has_corrective_offset = False
         self.report({'INFO'}, f"Cleared corrective offset for {item.target_name}")
         return {'FINISHED'}
 
@@ -256,11 +384,9 @@ classes = (
 )
 
 def register():
-    for cl in classes:  
+    for cl in classes:
         bpy.utils.register_class(cl)
 
 def unregister():
     for cl in reversed(classes):
         bpy.utils.unregister_class(cl)
-
-

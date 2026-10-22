@@ -17,12 +17,12 @@
 bl_info = {
     "name": "Retargetor",
     "author": "Henri Hebeisen",
-    "description": "",
+    "description": "Retarget animation between armatures with different rest poses",
     "blender": (5, 1, 0),
     "version": (0, 0, 1),
-    "location": "",
+    "location": "View3D > Sidebar > Retarget Tool",
     "warning": "",
-    "category": "Generic",
+    "category": "Animation",
 }
 
 import bpy
@@ -40,50 +40,39 @@ offset_items = [
     ("REST_OFFSET","Offset","Subtract the rotation offset between two rest poses", 1)
 ]
 
-def set_active_item_by_target(scene, target_name):
-    collection = scene.retarget_bones
-    for index, item in enumerate(collection):
-        if item.target_name == target_name:
-            scene.retarget_bones_active_index = index 
-            return True
-    return False
-
-def set_active_item_by_source(scene, target_name):
-    collection = scene.retarget_bones
-    for index, item in enumerate(collection):
-        if item.src_name == target_name:
-            scene.retarget_bones_active_index = index 
+def set_active_item(scene, field, bone_name):
+    """Make the list item whose `field` ("src_name" or "target_name") equals bone_name the active one"""
+    for index, item in enumerate(scene.retarget_bones):
+        if getattr(item, field) == bone_name:
+            if scene.retarget_bones_active_index != index:
+                scene.retarget_bones_active_index = index
             return True
     return False
 
 
-def on_bone_selection_changed(scene, pose_bone):
+def on_bone_selection_changed(scene, bone_name):
     active_obj = bpy.context.active_object
-    if active_obj is scene.retarget_source_armature:
-        found = set_active_item_by_source(scene, pose_bone.name)
-        if not found:
-            print(f"Pas de bone défini pour {pose_bone.name} dans l'armature target")
-    elif active_obj is scene.retarget_target_armature:
-        found = set_active_item_by_target(scene, pose_bone.name)
-        if not found:
-            print(f"Pas de bone défini pour {pose_bone.name} dans l'armature source")
+    if active_obj == scene.retarget_source_armature:
+        set_active_item(scene, "src_name", bone_name)
+    elif active_obj == scene.retarget_target_armature:
+        set_active_item(scene, "target_name", bone_name)
 
 
 @persistent
 def check_bone_selection_handler(scene):
+    # Properties are only written when the value really changes:
+    # writing from a depsgraph handler can trigger another depsgraph update.
     active_obj = bpy.context.active_object
     if active_obj and active_obj.type == 'ARMATURE' and active_obj.mode == 'POSE':
         active_bone = active_obj.data.bones.active
-        
+
         if active_bone:
-            # 3. Si l'os actif a changé par rapport à notre dernière sauvegarde
             if active_bone.name != scene.last_active_bone_name:
                 scene.last_active_bone_name = active_bone.name
-                pose_bone = active_obj.pose.bones.get(active_bone.name)
-                on_bone_selection_changed(scene, pose_bone)
-        else:
+                on_bone_selection_changed(scene, active_bone.name)
+        elif scene.last_active_bone_name:
             scene.last_active_bone_name = ""
-    else:
+    elif scene.last_active_bone_name:
         scene.last_active_bone_name = ""
 
 
@@ -94,9 +83,21 @@ class BoneRetargetInfo(PropertyGroup):
     rest_offset: FloatVectorProperty(name="Rest Offset",description="Quaternion difference between the two bones in their respective rest position",size=4,default=(1.0, 0.0, 0.0, 0.0))
     roll_offset: FloatProperty(name="Roll Offset", description="Rotation offset along target's local Y axis to match source coordinate system", subtype="ANGLE", default=0)
     is_setup: BoolProperty(name="Is Recorded", default=False)
+    use_translation: BoolProperty(name="Use Translation", description="Copy the translation of the source bone onto the target bone (root motion). Otherwise only the rotation is transferred.", default=False)
     offset_mode: EnumProperty(items=offset_items, description="Select the offset to apply after aligning bones.")
     has_corrective_offset: BoolProperty(name="Has Corrective Offset", description="Indicates if a corrective offset has been recorded for this bone.", default=False)
     corrective_offset : FloatVectorProperty(name="Corrective Offset", description="Additional corrective offset to apply after aligning bones.", size=4, default=(1.0, 0.0, 0.0, 0.0))
+
+# Every Scene property created by register_retarget_properties
+SCENE_PROPERTIES = (
+    "retarget_bones",
+    "retarget_bones_active_index",
+    "retarget_is_recording",
+    "retarget_current_initial_rotation",
+    "last_active_bone_name",
+    "retarget_source_armature",
+    "retarget_target_armature",
+)
 
 def register_retarget_properties():
     """Register retargeting properties"""
@@ -110,7 +111,6 @@ def register_retarget_properties():
     bpy.types.Scene.retarget_bones_active_index = bpy.props.IntProperty(
         name="Bones Index",
         default=0,
-        # update=setup_operators.on_shape_key_index_changed
     )
 
     bpy.types.Scene.retarget_is_recording = bpy.props.BoolProperty(
@@ -131,29 +131,23 @@ def register_retarget_properties():
         name="Last Selected Bone name"
     )
 
-    bpy.types.Scene.retarget_source_armature = bpy.props.PointerProperty( 
+    bpy.types.Scene.retarget_source_armature = bpy.props.PointerProperty(
         type=bpy.types.Object,
         name="Armature Source",
-        poll=lambda self, obj: obj.type == 'ARMATURE' 
+        poll=lambda self, obj: obj.type == 'ARMATURE'
     )
 
-    bpy.types.Scene.retarget_target_armature = bpy.props.PointerProperty( 
+    bpy.types.Scene.retarget_target_armature = bpy.props.PointerProperty(
         type=bpy.types.Object,
         name="Armature Target",
-        poll=lambda self, obj: obj.type == 'ARMATURE' 
-    )
-    
-    bpy.types.Scene.retarget_json_path = bpy.props.StringProperty( 
-        name="Chemin du fichier JSON",
-        default="",
-        subtype='FILE_PATH'
+        poll=lambda self, obj: obj.type == 'ARMATURE'
     )
 
 def unregister_retarget_properties():
     """Unregister retargeting properties"""
-    del bpy.types.Scene.retarget_source_armature 
-    del bpy.types.Scene.retarget_target_armature 
-    del bpy.types.Scene.retarget_json_path 
+    for name in SCENE_PROPERTIES:
+        if hasattr(bpy.types.Scene, name):
+            delattr(bpy.types.Scene, name)
 
 classes = (
     BoneRetargetInfo,
