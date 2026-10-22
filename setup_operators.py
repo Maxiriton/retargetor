@@ -76,6 +76,47 @@ def compute_item_offsets(context, item):
     return True
 
 
+def compute_translation_scale(context):
+    """Ratio target height / source height, measured on the mapped bone pairs only (rest pose, world space).
+    The height is the Z extent of the bone heads of the pairs, so both rigs are measured on the same landmarks.
+    Returns (scale, source_height, target_height), or None if it can't be measured."""
+    scene = context.scene
+    source_obj = scene.retarget_source_armature
+    target_obj = scene.retarget_target_armature
+    if not source_obj or not target_obj:
+        return None
+
+    src_z = []
+    tgt_z = []
+    for item in scene.retarget_bones:
+        if not item.target_name:
+            continue
+        src_bone = source_obj.data.bones.get(item.src_name)
+        tgt_bone = target_obj.data.bones.get(item.target_name)
+        if src_bone is None or tgt_bone is None:
+            continue
+        src_z.append((source_obj.matrix_world @ src_bone.head_local).z)
+        tgt_z.append((target_obj.matrix_world @ tgt_bone.head_local).z)
+
+    if len(src_z) < 2:
+        return None
+
+    source_height = max(src_z) - min(src_z)
+    target_height = max(tgt_z) - min(tgt_z)
+    if source_height < 1e-6 or target_height < 1e-6:
+        return None
+
+    return target_height / source_height, source_height, target_height
+
+
+def update_translation_scale(context):
+    """Compute the translation scale and store it in the scene. Returns the result of compute_translation_scale."""
+    result = compute_translation_scale(context)
+    if result is not None:
+        context.scene.retarget_translation_scale = result[0]
+    return result
+
+
 def update_target_bone(self, context):
     """Callback called when a user sets up a match for a source/target bone"""
     if _target_update_suspended:
@@ -152,7 +193,33 @@ class RTGTR_Setup_Bone_List(Operator):
                     used_targets.add(target_name)
                     compute_item_offsets(context, rtg_item)
 
+        update_translation_scale(context)
+
         self.report({'INFO'}, f"Found {len(scene.retarget_bones)} bones")
+        return {'FINISHED'}
+
+
+class RTGTR_OT_AutoTranslationScale(Operator):
+    """Compute the translation scale from the height of the mapped bones of both armatures"""
+    bl_idname = "retargetor.auto_translation_scale"
+    bl_label = "Auto"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        scene = context.scene
+        return scene.retarget_source_armature is not None and \
+               scene.retarget_target_armature is not None and \
+               len(scene.retarget_bones) > 0
+
+    def execute(self, context):
+        result = update_translation_scale(context)
+        if result is None:
+            self.report({'WARNING'}, "Impossible de mesurer les hauteurs : il faut au moins 2 os mappés à des hauteurs différentes.")
+            return {'CANCELLED'}
+
+        scale, source_height, target_height = result
+        self.report({'INFO'}, f"Translation scale = {scale:.4f} (hauteur source {source_height:.3f} m, cible {target_height:.3f} m)")
         return {'FINISHED'}
 
 
@@ -274,6 +341,8 @@ class RTGTR_import_retarget_json(Operator, ImportHelper):
                     item.is_setup = False
 
         if armatures_ready:
+            # The scale isn't stored in the JSON: it comes from the two rigs of the current scene
+            update_translation_scale(context)
             self.report({'INFO'}, f"Importation réussie ({len(data)} os, offsets recalculés pour {recomputed})")
         else:
             self.report({'INFO'}, f"Importation réussie ({len(data)} os). Armatures non définies : offsets du fichier conservés")
@@ -376,6 +445,7 @@ class RTGTR_OT_ClearRecord(Operator):
 ### Registration
 classes = (
     RTGTR_Setup_Bone_List,
+    RTGTR_OT_AutoTranslationScale,
     RTGTR_Record_to_json,
     RTGTR_import_retarget_json,
     RTGTR_OT_RecordAdjustement,

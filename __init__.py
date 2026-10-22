@@ -97,6 +97,7 @@ SCENE_PROPERTIES = (
     "last_active_bone_name",
     "retarget_source_armature",
     "retarget_target_armature",
+    "retarget_translation_scale",
 )
 
 def register_retarget_properties():
@@ -141,6 +142,15 @@ def register_retarget_properties():
         type=bpy.types.Object,
         name="Armature Target",
         poll=lambda self, obj: obj.type == 'ARMATURE'
+    )
+
+    bpy.types.Scene.retarget_translation_scale = bpy.props.FloatProperty(
+        name="Translation Scale",
+        description="Scale applied to the movement of the bones flagged 'Use Translation' (target size / source size). Not stored in the JSON",
+        default=1.0,
+        min=0.0001,
+        soft_max=10.0,
+        precision=4,
     )
 
 def unregister_retarget_properties():

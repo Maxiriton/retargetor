@@ -19,6 +19,10 @@ class RETARGETOR_PT_RetargetPanel(Panel):
         box.prop(scene, "retarget_source_armature", text="Source")
         box.prop(scene, "retarget_target_armature", text="Target")
 
+        row = box.row(align=True)
+        row.prop(scene, "retarget_translation_scale", text="Translation Scale")
+        row.operator("retargetor.auto_translation_scale", icon='FIXED_SIZE')
+
         if len(context.scene.retarget_bones) == 0 :
             layout.label(text="Bone list is empty: build it or import a JSON")
             row = layout.row(align=True)

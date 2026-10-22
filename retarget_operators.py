@@ -24,6 +24,30 @@ def build_target_map(scene):
     return mapping
 
 
+def scaled_target_location(scene, item, src_pose_bone, tgt_pose_bone):
+    """Position of the target bone head (in target armature space) for a bone flagged "Use Translation".
+
+    The source's movement away from its rest position is scaled by scene.retarget_translation_scale
+    and added to the target's own rest position:
+        target = target rest + k * (source now - source rest)
+    Everything is computed in world space, so object transforms and scales are taken into account.
+    """
+    source_obj = scene.retarget_source_armature
+    target_obj = scene.retarget_target_armature
+
+    src_rest_bone = source_obj.data.bones.get(item.src_name)
+    tgt_rest_bone = target_obj.data.bones.get(tgt_pose_bone.name)
+    if src_rest_bone is None or tgt_rest_bone is None:
+        raise KeyError(f"Os de repos introuvable pour la paire '{item.src_name}' / '{tgt_pose_bone.name}'.")
+
+    src_rest_world = source_obj.matrix_world @ src_rest_bone.head_local
+    src_now_world = source_obj.matrix_world @ src_pose_bone.head
+    tgt_rest_world = target_obj.matrix_world @ tgt_rest_bone.head_local
+
+    tgt_world = tgt_rest_world + scene.retarget_translation_scale * (src_now_world - src_rest_world)
+    return target_obj.matrix_world.inverted() @ tgt_world
+
+
 def snap_bone_rotation(context, bone_target_name, add_roll=True, add_corrective_offset=True, mapping=None):
     scene = context.scene
     target_obj = scene.retarget_target_armature
@@ -52,6 +76,9 @@ def snap_bone_rotation(context, bone_target_name, add_roll=True, add_corrective_
     matrix = target_obj.matrix_world.inverted() @ source_obj.matrix_world @ src_pose_bone.matrix
     location, rotation, _scale = matrix.decompose()
 
+    if item.use_translation:
+        location = scaled_target_location(scene, item, src_pose_bone, tgt_pose_bone)
+
     tgt_pose_bone.rotation_mode = 'QUATERNION'
     tgt_pose_bone.matrix = Matrix.LocRotScale(location, rotation, None)
 
@@ -73,6 +100,22 @@ def snap_bone_rotation(context, bone_target_name, add_roll=True, add_corrective_
         tgt_pose_bone.location = Vector((0.0, 0.0, 0.0))
 
     return True
+
+
+def keep_quaternion_continuous(pose_bone, previous_rotations):
+    """Make the bone's rotation_quaternion take the same hemisphere as the one keyed on the previous frame.
+    q and -q are the same rotation, but interpolating between them makes the bone spin the long way round.
+    Setting -q instead of q doesn't move the pose, it only changes the stored values."""
+    q = pose_bone.rotation_quaternion.copy()
+    previous = previous_rotations.get(pose_bone.name)
+    if previous is None:
+        # First frame: use a canonical sign (w >= 0) so the result doesn't depend on the matrix solver
+        if q.w < 0.0:
+            q.negate()
+    else:
+        q.make_compatible(previous)
+    pose_bone.rotation_quaternion = q
+    previous_rotations[pose_bone.name] = q
 
 
 def snap_bone_hierarchy_recursive(context, bone, mapping, add_roll, errors):
@@ -145,6 +188,7 @@ class RTGTR_SimpleRetarget(Operator):
         end_frame = scene.frame_end
         original_frame = scene.frame_current
         errors = set()
+        previous_rotations = {}  # {bone name: Quaternion keyed on the previous frame}
 
         try:
             for frame in range(start_frame, end_frame + 1):
@@ -152,6 +196,7 @@ class RTGTR_SimpleRetarget(Operator):
                 errors |= snap_full_pose(context, add_roll=True, repetitions=5, mapping=mapping)
 
                 for bone, use_translation in mapped_bones:
+                    keep_quaternion_continuous(bone, previous_rotations)
                     if use_translation:
                         bone.keyframe_insert(data_path="location", frame=frame)
                     bone.keyframe_insert(data_path="rotation_quaternion", frame=frame)
