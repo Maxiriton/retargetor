@@ -72,10 +72,15 @@ The animation itself is the source of truth: key poses are not stored in a separ
 | **JSON** | Export / import of a rig profile | Reuse a mapping on another similar rig. |
 | **Computed, not stored** | Translation scale | Depends on both skeletons together. |
 
-- **Linked rigs**: the profile comes with a rig linked from a library, so it is set up once in the rig's file. In a shot file it is probably read-only; it is then edited in the library file, or overridden locally with a JSON import. Exact behaviour with library overrides to check in Phase 2.
-- **Existing files**: setups saved in `scene.retarget_*` must be migrated, or moved through JSON export / import.
+- **Linked rigs** (checked in Phase 2, `tests/blender/test_library_override.py`): the profile comes with a rig linked from a library, so it is set up once in the rig's file.
+  - Linked without override: profile and character state are read-only (Python can change them in memory, nothing is saved).
+  - Library override of the character, default or fully editable: the **Object** is overridden, so the character state can be edited and is saved (bone list rows can be added). The **Armature data stays linked**, so the profile is read-only in the shot; the Rig Profile panel says so.
+  - To change the profile in one shot only, override the armature data too (Outliner, or `armature.override_create()`). Edits, added roles included, are then saved; changed values win over the library, the others keep following it.
+  - A JSON import needs editable armature data, so it only works on that last kind of override.
+- **Existing files**: setups saved in `scene.retarget_*` are moved onto the target object when the file is loaded (`migration.py`). When that can't be done (no target, linked target, target already set up), the setup stays on the scene; the JSON export / import route is documented in the README.
+- **Offsets are computed, not stored**: the rest offsets of a pair depend on both skeletons, like the translation scale.
 
 ## Open points
 
 None for now. Later topics are marked "later" or "to test" above.
-- Rig profile: stored on the rig (travels with linked rigs) or as a separate preset?
+- ~~Rig profile: stored on the rig (travels with linked rigs) or as a separate preset?~~ Both: stored on the Armature data, and presets as JSON files in `presets/` (same format as the export), loaded onto a rig.

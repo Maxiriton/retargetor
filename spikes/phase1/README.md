@@ -1,5 +1,9 @@
 # Phase 1 spike: rough end-to-end prototype on a Rigify rig
 
+> These scripts use the add-on as it was before Phase 2 (`scene.retarget_*`): run them at commit `62864b7`. The same chain through the new API is `tests/blender/test_chain.py`.
+>
+> Correction (Phase 2): the "FK snap vs the IK key poses: 0.00 cm" below was measured before Rigify's IK/FK switch drivers had updated (setting a custom property from Python doesn't tag the object). Measured correctly, directions stay exact (0.00°) and hands and feet are up to 0.5 cm from the IK pose, which is the IK stretch. The final results are unchanged.
+
 The whole chain, scripted and headless: key poses on a Rigify rig → SOMA → Kimodo → SOMA → back onto the Rigify controls. Uses the current Retargetor unchanged. Outputs go to `out/` (not committed); `out/result.blend` holds the rig with the baked motion and the generated SOMA armature next to it.
 
 ## Results (2026-10-31)

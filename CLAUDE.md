@@ -15,13 +15,20 @@ Retargetor is a Blender extension (Blender 5.1+) that retargets animation betwee
 
 | File | Role |
 |---|---|
-| `__init__.py` | Entry point, scene properties, bone selection handler |
-| `setup_operators.py` | Bone list setup, offsets, translation scale, JSON import/export, corrections |
-| `retarget_operators.py` | Snapping and baking |
-| `ui.py` | Sidebar panel and bone list |
-| `utils.py` | Old code, not imported, does not run as is (to remove or isolate in Phase 2) |
+| `__init__.py` | Entry point, bone selection handler |
+| `properties.py` | Stored data: rig profile on `Armature.retargetor_profile`, character state on `Object.retargetor`, `Scene.retargetor_target` (which character the panel edits) |
+| `migration.py` | `load_post` handler moving the old `scene.retarget_*` setups onto the target object |
+| `setup_operators.py` | Bone list setup, translation scale, JSON import/export, corrections |
+| `retarget_operators.py` | Snapping and baking operators |
+| `profile_operators.py` | Rig profile: presets, roles, JSON, Snap FK to IK |
+| `ui.py` | Sidebar panels and lists |
+| `core/retarget/` | `pairs.py` (`BonePair`, no `bpy`), `snap.py` (`Retargeter`: snap and bake on given frames, offsets computed from the rigs), `fk_snap.py` |
+| `core/roles.py`, `core/profile.py` | Humanoid roles and the rig profile in neutral form, `compose()` (no `bpy`) |
+| `core/motion.py`, `core/pose_io.py` | `Pose` / `Motion` / `GenerationRequest` (no `bpy`), read and written on an armature |
+| `presets/` | Rig profile presets (JSON) |
+| `tests/` | `unit/` (plain Python), `blender/` (headless), `fixtures/`; `python tests/run_tests.py` runs them all |
 
-The retargeting functions currently read their inputs from `scene.retarget_*`. Phase 2 makes them take the source, target and mapping as arguments.
+The core takes its inputs as arguments; only the operators read the panel's character. Rest offsets are computed from the two rigs, not stored.
 
 ## Conventions
 
@@ -33,7 +40,9 @@ The retargeting functions currently read their inputs from `scene.retarget_*`. P
 
 ## Testing
 
-- Headless: `"C:\Program Files\Blender Foundation\Blender 5.1\blender.exe" -b <file.blend> --python <script.py>`. The `blender` on PATH is 5.0, which is too old for this extension.
+- All tests: `python tests/run_tests.py --spikes <folder with phase0/out and phase1/out>` (the chain tests need the spike outputs, which are not committed).
+- Headless: `"C:\Program Files\Blender Foundation\Blender 5.1\blender.exe" -b --factory-startup <file.blend> --python <script.py>`. The `blender` on PATH is 5.0, which is too old for this extension.
+- Setting a custom property from Python doesn't tag the object: call `obj.update_tag()` before reading anything driven by it (Rigify's IK/FK switch).
 - Live inspection goes through the Blender MCP connector; it needs Blender running with the MCP add-on server started.
 - Machine-specific paths (Kimodo venv, test files) are in `CLAUDE.local.md`, which is not committed.
 

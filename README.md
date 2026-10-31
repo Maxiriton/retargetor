@@ -20,6 +20,8 @@ Retargetor is a Blender add-on that copies an animation bone by bone from a *sou
 - **Translation scale**: the root motion is scaled by the size ratio between the two rigs, so a small character doesn't slide like a giant one.
 - **Smooth rotations**: quaternion signs are kept continuous from frame to frame, so bones never spin the long way round between two keyframes.
 - **Import / export** of the matching as JSON, to reuse a setup on other scenes.
+- **Several characters per scene**: each target armature keeps its own setup.
+- **Rig profile**: map a rig once to humanoid roles (hips, upper arm, shin...), with a bone to read and a control to write for each, and snap the FK controls of IK-posed limbs. A Rigify preset is included. This is the groundwork for the motion generation pipeline (see [ROADMAP.md](ROADMAP.md)).
 
 ## Requirements
 
@@ -35,7 +37,7 @@ The panel appears in the 3D Viewport sidebar (press `N`), in the **Retarget Tool
 
 ## Quick start
 
-1. **Choose the armatures.** Set **Source** (the armature that holds the animation) and **Target** (the one that should receive it).
+1. **Choose the armatures.** Set **Target** (the armature that should receive the animation), then **Source** (the one that holds it). The setup is stored on the target object, so each character of the scene keeps its own; switching **Target** switches the setup shown in the panel.
 2. **Build the bone list.** Click **Setup Bone list**, or **Import from JSON** if you already have a setup. Retargetor lists every source bone and proposes a target bone by name.
 3. **Review the matching.** For every row:
    - set the target bone (leave it empty to ignore a source bone),
@@ -63,7 +65,7 @@ Selecting a bone in Pose Mode (on either armature) selects the matching row in t
 - **Roll** fixes the case where the two bones point the same way but are twisted differently around their own axis.
 - **Offset** applies the full rotation between the two rest poses. Try it when Roll isn't enough.
 
-Both are computed automatically from the rest poses when a target bone is set.
+Both are computed from the rest poses of the two armatures each time you snap or retarget, so they are always up to date.
 
 ### Recording a correction
 
@@ -100,9 +102,26 @@ Both work in Pose Mode on the target armature.
 
 ## JSON setups
 
-**Export to JSON** saves the whole list: bone names, offsets, offset modes, translation flags and recorded corrections. **Import from JSON** loads it back. If both armatures are set, the rest pose offsets are recomputed from the current scene on import, and the translation scale is recomputed as well.
+**Export to JSON** saves the whole list: bone names, offset modes, translation flags and recorded corrections. **Import from JSON** loads it back onto the current target, and recomputes the translation scale if the source is set.
 
-Files exported by older versions can still be imported. Missing fields fall back to safe defaults (no translation, no correction).
+Files exported by older versions can still be imported. Missing fields fall back to safe defaults (no translation, no correction); the rest offsets they contain are ignored, since they are computed from the rigs.
+
+## Files made with older versions
+
+Older versions stored the setup on the scene (one per scene). When such a file is opened, the setup is moved onto its target armature object automatically, and the scene's **Target** is set to it. The setup is left on the scene, and a message is printed in the console, when it can't be moved: no target armature, a linked target, or a target that already has a bone list. In that case, open the file with the old version, **Export to JSON**, then open it with this version and **Import from JSON** on the target.
+
+## Rig profile
+
+The **Rig Profile** panel (same tab) describes how the **active armature** maps to humanoid roles. It is stored on the armature data, so every object using that armature shares it, and it travels with a rig linked from a library.
+
+- **Load Preset** fills it from a preset (Rigify human, with its FK controls), **Add Roles** adds the missing roles with their defaults.
+- Per role: **Read** is the bone whose pose is read (on Rigify, the `ORG-` bone, the result of FK and IK), **Write** is the control that receives motion (on Rigify, the FK control; empty means the role isn't written), Use Translation, and the offset mode. Limbs default to **Roll**, the spine, neck and head to **Offset**.
+- **IK limbs**: for each limb, the FK controls and the bone each one follows, and the IK/FK switch property. **Snap FK to IK** rotates the FK controls onto the current pose on the frames you list (for example `1, 61, 120`, or empty for the current frame), keys them, and switches the limbs to FK. IK keys are kept.
+- **Import Profile** / **Export Profile** save it as JSON, to reuse it on a similar rig.
+
+### Linked rigs and library overrides
+
+Set the profile up in the rig's own file. In a shot file that links the rig, the profile is read-only. A library override of the character overrides the object (so the per-character setup in the Retarget panel can be edited and is saved) but **not the armature data**, even with a fully editable override: the profile stays the library's, and edits made there would not be saved. To change the profile in a shot only, override the armature data too (from Python: `rig.data = rig.data.override_create(remap_local_usages=True)`; the Outliner's **Library Override > Make** on the armature data should do the same). Values you change then win over the library, and the others still follow it.
 
 ## Good to know
 
@@ -111,17 +130,25 @@ Files exported by older versions can still be imported. Missing fields fall back
 - The target bones are switched to quaternion rotation.
 - With **Rigify** targets, match the **FK** controls and set the limbs to FK, otherwise the snapped bones will have no visible effect.
 - Retargeting scales the root motion, but it can't remove foot sliding when the legs of the two rigs have very different proportions.
-- Retargeting runs over the scene's frame range and can take a while on long animations.
+- **Retarget** runs over the scene's frame range and can take a while on long animations.
 
 ## Project layout
 
 | File | Role |
 |---|---|
-| `__init__.py` | Add-on entry point, properties, selection handler |
-| `setup_operators.py` | Bone list setup, offsets, translation scale, JSON import/export, corrections |
+| `__init__.py` | Add-on entry point, selection handler |
+| `properties.py` | Where the data is stored: rig profile (Armature), character setup (Object) |
+| `migration.py` | Moves setups saved by older versions off the scene |
+| `setup_operators.py` | Bone list setup, translation scale, JSON import/export, corrections |
 | `retarget_operators.py` | Snapping and baking |
-| `ui.py` | Sidebar panel and bone list |
+| `profile_operators.py` | Rig profile: presets, roles, JSON, Snap FK to IK |
+| `ui.py` | Sidebar panels and lists |
+| `core/` | Retargeting core, humanoid roles, neutral motion types (see below) |
+| `presets/` | Rig profile presets |
+| `tests/` | Unit tests and headless Blender tests (`python tests/run_tests.py`) |
 | `blender_manifest.toml` | Extension manifest |
+
+The core can be used from scripts, without the scene properties: `core.retarget.snap.Retargeter(source, target, pairs, translation_scale)` snaps (`snap_pose`) or bakes (`bake(scene, view_layer, frames)`) a list of `BonePair`s, and `core.profile.compose(profile, joint_map, direction)` builds those pairs from a rig profile and a skeleton's role → joint map.
 
 ## License
 

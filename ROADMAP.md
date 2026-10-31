@@ -80,22 +80,28 @@ Hard-coded values and manual steps are fine. **Done when** a short clip goes thr
 
 ### Phase 2: retargeting core refactor
 
-- [ ] Make the retargeting functions independent of `scene.retarget_*` (source, target and mapping passed as arguments).
-- [ ] Move the rig profile to the Armature data and the per-character state to the Object, so a scene can hold several characters (see DESIGN.md).
-- [ ] Migrate setups saved in `scene.retarget_*`, or document the JSON export / import route.
-- [ ] Check how the rig profile behaves on a rig linked from a library, with library overrides.
-- [ ] Snap and bake on a given list of frames, not only the scene range.
-- [ ] Humanoid roles: rig bone → role mapping, saved and reloaded. Per role: a bone to **read** (e.g. Rigify `ORG-`) and a control to **write** (e.g. Rigify FK control).
-- [ ] Default offset mode per role: limbs ROLL (copies the direction), spine and hips REST_OFFSET (Phase 1 finding).
-- [ ] Canonicalize the heading as well as the root position.
-- [ ] Exclude `spikes/` from the extension build.
-- [ ] Neutral types in `core/motion.py`.
-- [ ] Remove or isolate the dead code in `utils.py`.
+- [x] Make the retargeting functions independent of `scene.retarget_*` (source, target and mapping passed as arguments).
+- [x] Move the rig profile to the Armature data and the per-character state to the Object, so a scene can hold several characters (see DESIGN.md).
+- [x] Migrate setups saved in `scene.retarget_*` (automatic on file load), and document the JSON export / import route.
+- [x] Check how the rig profile behaves on a rig linked from a library, with library overrides (see DESIGN.md).
+- [x] Snap and bake on a given list of frames, not only the scene range.
+- [x] Humanoid roles: rig bone → role mapping, saved and reloaded. Per role: a bone to **read** (e.g. Rigify `ORG-`) and a control to **write** (e.g. Rigify FK control).
+- [x] Default offset mode per role: limbs ROLL (copies the direction), spine and hips REST_OFFSET (Phase 1 finding).
+- [ ] Canonicalize the heading as well as the root position. → moved to Phase 3 (it depends on the backend).
+- [x] Exclude `spikes/` from the extension build.
+- [x] Neutral types in `core/motion.py`.
+- [x] Remove or isolate the dead code in `utils.py` (removed).
 
 **Done when** the Phase 1 chain runs through the new API, and the existing panel still works.
 
+**Done (2026-10-31)** on branch `refactor/retarget-core`. `tests/blender/test_chain.py` runs the Phase 1 chain through the rig profile and `Retargeter`, in FK and on the IK-posed rig snapped to FK: the SOMA key poses and the baked rig are identical to the spike's results (0.0000°, 0.0000 cm). A setup made and baked by the previous version is migrated and baked again with identical keys. `tests/blender/test_panel.py` covers the panel workflow. `python tests/run_tests.py` runs everything.
+
+A correction to Phase 1: the spike's "FK snap vs IK pose: 0.00 cm" was measured before Rigify's IK/FK switch drivers had updated (a custom property set from Python doesn't tag the object). Measured correctly, the FK snap keeps the limb directions exact (0.00°) and puts hands and feet up to 0.5 cm from the IK pose: the IK stretch already described. The final results are unaffected.
+
 ### Phase 3: backends
 
+- [ ] Canonicalize the heading as well as the root position (moved from Phase 2).
+- [ ] Move the SOMA role → joint map from `tests/fixtures/soma_roles.json` into `backends/kimodo/`.
 - [ ] Backend interface and JSON worker protocol.
 - [ ] Interpolation backend (pure Python).
 - [ ] Kimodo backend: skeleton, role mapping, conversions, worker running in the Kimodo venv (path set in the add-on preferences).
@@ -134,6 +140,9 @@ Hard-coded values and manual steps are fine. **Done when** a short clip goes thr
 
 | 2026-10-31 | First rig to support: Rigify (FK first, IK in Phase 4). |
 | 2026-10-31 | Generated motion is always written to FK controls. Limbs posed in IK get their FK controls snapped to the IK pose first; no writing to IK controls (Rigify's IK stretch makes it inexact). After generation the limbs simply play in FK, for now. |
+| 2026-10-31 | Rest offsets are computed from the two rigs when snapping or baking, not stored (like the translation scale). JSON files keep their format; old offset fields are ignored. |
+| 2026-10-31 | The manual bone list (any source → any target) stays next to the rig profile: both produce `BonePair`s for the same core. The scene only keeps which character the panel edits. |
+| 2026-10-31 | Rig profile presets ship as JSON in `presets/` (same format as the profile export). The SOMA role map lives in the test fixtures until Phase 3. |
 
 ## Open questions
 - Kimodo's code and weights licence, and what it means for distributing the extension.
