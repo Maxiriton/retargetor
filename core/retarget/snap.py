@@ -115,14 +115,15 @@ class Retargeter:
         self.source_obj = source_obj
         self.target_obj = target_obj
         self.translation_scale = translation_scale
-        self.errors = set()
 
         self.resolved = {}  # {target bone name: _ResolvedPair}
+        self._unresolved = {}  # {target bone name: why the pair was skipped}
         for target_name, pair in target_map(pairs).items():
             try:
                 self.resolved[target_name] = _ResolvedPair(source_obj, target_obj, pair)
             except KeyError as e:
-                self.errors.add(str(e.args[0]))
+                self._unresolved[target_name] = str(e.args[0])
+        self.errors = set(self._unresolved.values())
 
         # Target bones in hierarchy order (parents first), so a child is snapped after its parent
         self.order = []
@@ -193,7 +194,8 @@ class Retargeter:
         """Snap a single target bone at the current frame. Raises KeyError if it isn't mapped."""
         resolved = self.resolved.get(target_name)
         if resolved is None:
-            raise KeyError(f"The target bone '{target_name}' is not mapped to a source bone.")
+            raise KeyError(self._unresolved.get(
+                target_name, f"The target bone '{target_name}' is not mapped to a source bone."))
         self._snap(resolved, add_roll=add_roll, add_correction=add_correction)
 
     def snap_pose(self, view_layer, add_roll=True, add_correction=True, repetitions=5):
