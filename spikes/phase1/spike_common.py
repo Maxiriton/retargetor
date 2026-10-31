@@ -39,6 +39,92 @@ for side, soma_side in (("L", "Left"), ("R", "Right")):
     })
 
 
+# Rigify limbs: FK chain, IK control, pole control, the bone holding the IK_FK switch, toe controls (legs)
+IK_CHAINS = []
+for side in "LR":
+    IK_CHAINS.append({"fk": [f"upper_arm_fk.{side}", f"forearm_fk.{side}", f"hand_fk.{side}"],
+                      "ik": f"hand_ik.{side}", "pole": f"upper_arm_ik_target.{side}",
+                      "switch": f"upper_arm_parent.{side}", "toe": None})
+    IK_CHAINS.append({"fk": [f"thigh_fk.{side}", f"shin_fk.{side}", f"foot_fk.{side}"],
+                      "ik": f"foot_ik.{side}", "pole": f"thigh_ik_target.{side}",
+                      "switch": f"thigh_parent.{side}", "toe": (f"toe_fk.{side}", f"toe_ik.{side}")})
+
+
+def ik_rest_data(rig):
+    """Rest relations used to place the IK controls from an FK pose (armature space)."""
+    bones = rig.data.bones
+    data = {}
+    for chain in IK_CHAINS:
+        upper, _mid, end = (bones[n].matrix_local for n in chain["fk"])
+        pole = bones[chain["pole"]].head_local
+        elbow = bones[chain["fk"][1]].head_local
+        data[chain["ik"]] = {
+            "end_to_ik": end.inverted() @ bones[chain["ik"]].matrix_local,
+            # Pole offset from the elbow/knee, in the upper bone's rest frame
+            "pole_local": upper.to_3x3().inverted() @ (pole - elbow),
+        }
+        if chain["toe"]:
+            toe_fk, toe_ik = chain["toe"]
+            data[chain["ik"]]["toe_fk_to_ik"] = bones[toe_fk].matrix_local.inverted() @ bones[toe_ik].matrix_local
+    return data
+
+
+def capture_fk(rig):
+    """Armature-space matrices of the FK chains (and toes) at the current frame."""
+    names = [n for chain in IK_CHAINS for n in chain["fk"]] + [c["toe"][0] for c in IK_CHAINS if c["toe"]]
+    return {n: rig.pose.bones[n].matrix.copy() for n in names}
+
+
+def apply_fk_to_ik(rig, fk, rest):
+    """Place the IK controls and poles so the IK chains reproduce the given FK matrices.
+    Hands, feet and toes are exact. Elbows and knees are not: Rigify's IK bones have ik_stretch 0.1,
+    so the solver shrinks the bones slightly instead of bending them fully (see README)."""
+    pbones = rig.pose.bones
+    for chain in IK_CHAINS:
+        data = rest[chain["ik"]]
+        upper, mid, end = (fk[n] for n in chain["fk"])
+        pbones[chain["ik"]].matrix = end @ data["end_to_ik"]
+        pole = pbones[chain["pole"]]
+        # The pole goes in the plane of the FK chain, on the elbow/knee side, so the IK solver puts the
+        # elbow/knee where the FK chain has it. A straight limb has no plane: fall back to the rest offset.
+        root, joint, tip = upper.to_translation(), mid.to_translation(), end.to_translation()
+        axis = (tip - root).normalized()
+        bend = (joint - root) - axis * (joint - root).dot(axis)
+        rest_offset = upper.to_3x3().normalized() @ data["pole_local"]
+        if bend.length > 0.01:
+            pole_pos = joint + bend.normalized() * rest_offset.length
+        else:
+            pole_pos = joint + rest_offset
+        pole.matrix = Matrix.Translation(pole_pos) @ pole.matrix.to_3x3().to_4x4()
+    bpy.context.view_layer.update()
+    for chain in IK_CHAINS:
+        if chain["toe"]:
+            toe_fk, toe_ik = chain["toe"]
+            pbones[toe_ik].matrix = fk[toe_fk] @ rest[chain["ik"]]["toe_fk_to_ik"]
+    bpy.context.view_layer.update()
+
+
+def ik_controls():
+    names = []
+    for chain in IK_CHAINS:
+        names += [chain["ik"], chain["pole"]] + ([chain["toe"][1]] if chain["toe"] else [])
+    return names
+
+
+def set_limbs_mode(rig, ik):
+    for chain in IK_CHAINS:
+        switch = rig.pose.bones[chain["switch"]]
+        switch["IK_FK"] = 0.0 if ik else 1.0
+        switch["pole_vector"] = bool(ik)
+    bpy.context.view_layer.update()
+
+
+def channelbag(obj):
+    """F-curves of an object's action (Blender 5 layered actions)."""
+    from bpy_extras.anim_utils import action_get_channelbag_for_slot
+    return action_get_channelbag_for_slot(obj.animation_data.action, obj.animation_data.action_slot)
+
+
 def load_soma_skeleton():
     with open(SOMA_SKELETON) as f:
         return json.load(f)

@@ -1,8 +1,10 @@
 """Phase 1 spike: import the generated motion and retarget it back onto the Rigify FK controls.
 
 Run headless with Blender 5.1+:
-    blender -b --factory-startup <out_dir>/rig_keyposes.blend --python soma_to_rig.py -- <out_dir> <motion.bvh> <frame> [<frame> ...]
+    blender -b --factory-startup <rig.blend> --python soma_to_rig.py -- <out_dir> <motion.bvh> <fk|ik> <frame> [<frame> ...]
 
+The motion is baked onto the FK controls. With "ik", it is then transferred onto the IK controls
+and poles on every frame, and the limbs stay in IK.
 Compares the rig at the key frames before and after (the rig should get its own key poses back),
 then saves <out_dir>/result.blend with the rig and the generated SOMA motion.
 """
@@ -29,7 +31,19 @@ def snapshot(rig):
     return data
 
 
-def main(out_dir, bvh_path, frames):
+def bake_ik(rig, scene):
+    """Transfer the baked FK chains onto the IK controls and poles, on every frame."""
+    rest = common.ik_rest_data(rig)
+    for frame in range(scene.frame_start, scene.frame_end + 1):
+        scene.frame_set(frame)
+        common.apply_fk_to_ik(rig, common.capture_fk(rig), rest)
+        for name in common.ik_controls():
+            pb = rig.pose.bones[name]
+            pb.keyframe_insert("location", frame=frame)
+            pb.keyframe_insert("rotation_quaternion", frame=frame)
+
+
+def main(out_dir, bvh_path, target, frames):
     scene = bpy.context.scene
     rig = bpy.data.objects["rig"]
     with open(os.path.join(out_dir, "canonical.json")) as fp:
@@ -59,6 +73,9 @@ def main(out_dir, bvh_path, frames):
     bpy.context.view_layer.objects.active = rig
     result = bpy.ops.retargetor.simple_retarget()
     print(f"Bake: {result}")
+    if target == "ik":
+        bake_ik(rig, scene)
+        print("IK controls baked")
 
     for frame in frames:
         scene.frame_set(frame)
@@ -76,4 +93,4 @@ def main(out_dir, bvh_path, frames):
 
 if __name__ == "__main__":
     args = sys.argv[sys.argv.index("--") + 1:]
-    main(args[0], args[1], [int(f) for f in args[2:]])
+    main(args[0], args[1], args[2], [int(f) for f in args[3:]])

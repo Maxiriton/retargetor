@@ -106,7 +106,7 @@ Hard-coded values and manual steps are fine. **Done when** a short clip goes thr
 
 ### Phase 4: controller rigs
 
-- [ ] IK/FK limbs, Rigify.
+- [ ] IK/FK limbs, Rigify. Reading already works in IK; writing goes through an FK → IK transfer per frame, tested in Phase 1 (hands and feet exact, elbows and knees within a few cm because of Rigify's `ik_stretch`). Decide how to handle that stretch, and how the rig profile describes the IK controls and poles.
 - [ ] Never overwrite the user's key poses: only fill the frames between them.
 - [ ] Partial poses: constrain only the keyed controls (end-effectors).
 - [ ] Regenerate a single segment between two keys.
