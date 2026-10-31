@@ -1,0 +1,243 @@
+"""Snapping and baking a target armature onto a source armature.
+
+Everything comes in as arguments: the two armature objects, the bone pairs (core.retarget.pairs.BonePair),
+the translation scale and the frames. Nothing is read from the scene properties.
+
+Rest offsets (roll and rest rotation difference) are computed here from the two rest poses: they depend on
+both skeletons, so they are not stored.
+"""
+import math
+
+from mathutils import Matrix, Quaternion, Vector
+
+from .pairs import target_map
+
+
+def rest_rotations(source_obj, target_obj, source_name, target_name):
+    """World-space rest orientations (scale ignored) of a source/target bone pair.
+    Raises KeyError if one of the bones doesn't exist."""
+    src_bone = source_obj.data.bones.get(source_name)
+    if src_bone is None:
+        raise KeyError(f"The source bone '{source_name}' does not exist in the armature '{source_obj.name}'.")
+    tgt_bone = target_obj.data.bones.get(target_name)
+    if tgt_bone is None:
+        raise KeyError(f"The target bone '{target_name}' does not exist in the armature '{target_obj.name}'.")
+
+    q_src = (source_obj.matrix_world @ src_bone.matrix_local).to_quaternion()
+    q_tgt = (target_obj.matrix_world @ tgt_bone.matrix_local).to_quaternion()
+    return q_src, q_tgt
+
+
+def rest_offsets(source_obj, target_obj, source_name, target_name):
+    """(roll offset in radians, rest offset Quaternion) of a pair, from the rest poses of its two bones."""
+    q_src, q_tgt = rest_rotations(source_obj, target_obj, source_name, target_name)
+
+    # Roll: angle around the target's local Y axis, from the source's X axis expressed in the target's local space
+    x_src_in_tgt_local = q_tgt.inverted() @ (q_src @ Vector((1.0, 0.0, 0.0)))
+    roll = math.atan2(x_src_in_tgt_local.z, x_src_in_tgt_local.x)
+
+    # Rest offset: rotation difference between the two bones in their rest pose
+    return roll, q_src.rotation_difference(q_tgt)
+
+
+def compute_translation_scale(source_obj, target_obj, pairs):
+    """Ratio target height / source height, measured on the given pairs only (rest pose, world space).
+    The height is the Z extent of the bone heads of the pairs, so both rigs are measured on the same landmarks.
+    Returns (scale, source_height, target_height), or None if it can't be measured."""
+    src_z = []
+    tgt_z = []
+    for pair in pairs:
+        if not pair.source or not pair.target:
+            continue
+        src_bone = source_obj.data.bones.get(pair.source)
+        tgt_bone = target_obj.data.bones.get(pair.target)
+        if src_bone is None or tgt_bone is None:
+            continue
+        src_z.append((source_obj.matrix_world @ src_bone.head_local).z)
+        tgt_z.append((target_obj.matrix_world @ tgt_bone.head_local).z)
+
+    if len(src_z) < 2:
+        return None
+
+    source_height = max(src_z) - min(src_z)
+    target_height = max(tgt_z) - min(tgt_z)
+    if source_height < 1e-6 or target_height < 1e-6:
+        return None
+
+    return target_height / source_height, source_height, target_height
+
+
+def keep_quaternion_continuous(pose_bone, previous_rotations):
+    """Make the bone's rotation_quaternion take the same hemisphere as the one keyed on the previous frame.
+    q and -q are the same rotation, but interpolating between them makes the bone spin the long way round.
+    Setting -q instead of q doesn't move the pose, it only changes the stored values."""
+    q = pose_bone.rotation_quaternion.copy()
+    previous = previous_rotations.get(pose_bone.name)
+    if previous is None:
+        # First frame: use a canonical sign (w >= 0) so the result doesn't depend on the matrix solver
+        if q.w < 0.0:
+            q.negate()
+    else:
+        q.make_compatible(previous)
+    pose_bone.rotation_quaternion = q
+    previous_rotations[pose_bone.name] = q
+
+
+class _ResolvedPair:
+    """A BonePair with its pose bones and rest offsets looked up once."""
+    __slots__ = ("pair", "src_pose_bone", "tgt_pose_bone", "roll", "rest_offset", "correction")
+
+    def __init__(self, source_obj, target_obj, pair):
+        self.pair = pair
+        self.src_pose_bone = source_obj.pose.bones.get(pair.source)
+        if self.src_pose_bone is None:
+            raise KeyError(f"The source bone '{pair.source}' does not exist in the source armature '{source_obj.name}'.")
+        self.tgt_pose_bone = target_obj.pose.bones.get(pair.target)
+        if self.tgt_pose_bone is None:
+            raise KeyError(f"The target bone '{pair.target}' does not exist in the armature '{target_obj.name}'.")
+        self.roll, self.rest_offset = rest_offsets(source_obj, target_obj, pair.source, pair.target)
+        self.correction = Quaternion(pair.correction) if pair.correction is not None else None
+
+
+class Retargeter:
+    """Copies the pose of a source armature onto a target armature, for a given list of bone pairs.
+
+    Raises ValueError if an armature is missing or several pairs write to the same target bone.
+    Pairs whose bones can't be found are skipped; their messages are in `errors`.
+    """
+
+    def __init__(self, source_obj, target_obj, pairs, translation_scale=1.0):
+        if source_obj is None or target_obj is None:
+            raise ValueError("The source or target armature is not set.")
+        if source_obj.type != 'ARMATURE' or target_obj.type != 'ARMATURE':
+            raise ValueError("The source and the target must both be armatures.")
+
+        self.source_obj = source_obj
+        self.target_obj = target_obj
+        self.translation_scale = translation_scale
+        self.errors = set()
+
+        self.resolved = {}  # {target bone name: _ResolvedPair}
+        for target_name, pair in target_map(pairs).items():
+            try:
+                self.resolved[target_name] = _ResolvedPair(source_obj, target_obj, pair)
+            except KeyError as e:
+                self.errors.add(str(e.args[0]))
+
+        # Target bones in hierarchy order (parents first), so a child is snapped after its parent
+        self.order = []
+        roots = [bone for bone in target_obj.data.bones if bone.parent is None]
+        if not roots:
+            raise ValueError(f"The armature '{target_obj.name}' contains no bones.")
+        stack = list(reversed(roots))
+        while stack:
+            bone = stack.pop()
+            if bone.name in self.resolved:
+                self.order.append(self.resolved[bone.name])
+            stack.extend(reversed(bone.children))
+
+    @property
+    def target_bones(self):
+        """Pose bones of the target that receive the pose, in hierarchy order."""
+        return [r.tgt_pose_bone for r in self.order]
+
+    def _scaled_target_location(self, resolved):
+        """Position of the target bone head (in target armature space) for a bone flagged "Use Translation".
+
+        The source's movement away from its rest position is scaled by the translation scale
+        and added to the target's own rest position:
+            target = target rest + k * (source now - source rest)
+        Everything is computed in world space, so object transforms and scales are taken into account.
+        """
+        source_obj, target_obj = self.source_obj, self.target_obj
+        src_rest_world = source_obj.matrix_world @ resolved.src_pose_bone.bone.head_local
+        src_now_world = source_obj.matrix_world @ resolved.src_pose_bone.head
+        tgt_rest_world = target_obj.matrix_world @ resolved.tgt_pose_bone.bone.head_local
+
+        tgt_world = tgt_rest_world + self.translation_scale * (src_now_world - src_rest_world)
+        return target_obj.matrix_world.inverted() @ tgt_world
+
+    def _snap(self, resolved, add_roll=True, add_correction=True):
+        pair = resolved.pair
+        tgt_pose_bone = resolved.tgt_pose_bone
+
+        # Source pose expressed in the target armature space (object transforms included).
+        # The scale is dropped: only the position and the orientation are copied.
+        matrix = self.target_obj.matrix_world.inverted() @ self.source_obj.matrix_world @ resolved.src_pose_bone.matrix
+        location, rotation, _scale = matrix.decompose()
+
+        if pair.use_translation:
+            location = self._scaled_target_location(resolved)
+
+        tgt_pose_bone.rotation_mode = 'QUATERNION'
+        tgt_pose_bone.matrix = Matrix.LocRotScale(location, rotation, None)
+
+        q_rot = tgt_pose_bone.rotation_quaternion.copy()
+
+        if add_roll:
+            if pair.offset_mode == 'ROLL':
+                q_rot = q_rot @ Quaternion(Vector((0.0, 1.0, 0.0)), resolved.roll)
+            elif pair.offset_mode == 'REST_OFFSET':
+                q_rot = q_rot @ resolved.rest_offset
+
+        if add_correction and resolved.correction is not None:
+            q_rot = q_rot @ resolved.correction
+
+        tgt_pose_bone.rotation_quaternion = q_rot
+
+        # Only the bones flagged "Use Translation" keep the copied translation
+        if not pair.use_translation:
+            tgt_pose_bone.location = Vector((0.0, 0.0, 0.0))
+
+    def snap_bone(self, target_name, add_roll=True, add_correction=True):
+        """Snap a single target bone at the current frame. Raises KeyError if it isn't mapped."""
+        resolved = self.resolved.get(target_name)
+        if resolved is None:
+            raise KeyError(f"The target bone '{target_name}' is not mapped to a source bone.")
+        self._snap(resolved, add_roll=add_roll, add_correction=add_correction)
+
+    def snap_pose(self, view_layer, add_roll=True, add_correction=True, repetitions=5):
+        """Snap every mapped target bone at the current frame, parents first.
+        The whole pass is repeated, since a child reads its parent's matrix, which is only refreshed by an update."""
+        for _iteration in range(repetitions):
+            for resolved in self.order:
+                self._snap(resolved, add_roll=add_roll, add_correction=add_correction)
+            view_layer.update()
+
+    def bake(self, scene, view_layer, frames, keytype='KEYFRAME', repetitions=5):
+        """Snap and key the mapped target bones on each of the given frames (Blender frame numbers).
+        Rotations are keyed as quaternions with continuous signs; locations only on the bones flagged
+        "Use Translation". The current frame is restored at the end. Returns the number of frames baked."""
+        frames = sorted(set(int(f) for f in frames))
+        keyed = [(r.tgt_pose_bone, r.pair.use_translation) for r in self.order]
+        original_frame = scene.frame_current
+        previous_rotations = {}  # {bone name: Quaternion keyed on the previous frame}
+
+        try:
+            for frame in frames:
+                scene.frame_set(frame)
+                self.snap_pose(view_layer, repetitions=repetitions)
+
+                for bone, use_translation in keyed:
+                    keep_quaternion_continuous(bone, previous_rotations)
+                    if use_translation:
+                        bone.keyframe_insert(data_path="location", frame=frame, keytype=keytype)
+                    bone.keyframe_insert(data_path="rotation_quaternion", frame=frame, keytype=keytype)
+        finally:
+            scene.frame_set(original_frame)
+
+        return len(frames)
+
+
+def snap_pose(context, source_obj, target_obj, pairs, translation_scale=1.0, add_roll=True, repetitions=5):
+    """Snap the target armature onto the source at the current frame. Returns the set of error messages."""
+    retargeter = Retargeter(source_obj, target_obj, pairs, translation_scale)
+    retargeter.snap_pose(context.view_layer, add_roll=add_roll, repetitions=repetitions)
+    return retargeter.errors
+
+
+def bake(context, source_obj, target_obj, pairs, frames, translation_scale=1.0, keytype='KEYFRAME', repetitions=5):
+    """Snap and key the target armature on the given frames. Returns the set of error messages."""
+    retargeter = Retargeter(source_obj, target_obj, pairs, translation_scale)
+    retargeter.bake(context.scene, context.view_layer, frames, keytype=keytype, repetitions=repetitions)
+    return retargeter.errors
