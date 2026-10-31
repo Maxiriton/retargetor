@@ -69,12 +69,14 @@ ui/
 
 ### Phase 1: rough end-to-end prototype
 
-- [ ] Pose the user rig at 2–3 key frames.
-- [ ] Retarget those poses onto the SOMA armature with the current Retargetor.
-- [ ] Export the constraints, generate by hand, import the result.
-- [ ] Retarget the result back onto the user rig.
+- [x] Pose the user rig at 2–3 key frames.
+- [x] Retarget those poses onto the SOMA armature with the current Retargetor.
+- [x] Export the constraints, generate by hand, import the result.
+- [x] Retarget the result back onto the user rig.
 
 Hard-coded values and manual steps are fine. **Done when** a short clip goes through the whole chain and we have a list of what goes wrong.
+
+**Done (2026-10-31)** on a Rigify rig in FK. The rig gets its key poses back exactly and follows the generated motion in between. The list of what goes wrong is in [spikes/phase1/README.md](spikes/phase1/README.md); its consequences are in Phase 2 below.
 
 ### Phase 2: retargeting core refactor
 
@@ -83,7 +85,10 @@ Hard-coded values and manual steps are fine. **Done when** a short clip goes thr
 - [ ] Migrate setups saved in `scene.retarget_*`, or document the JSON export / import route.
 - [ ] Check how the rig profile behaves on a rig linked from a library, with library overrides.
 - [ ] Snap and bake on a given list of frames, not only the scene range.
-- [ ] Humanoid roles: rig bone → role mapping, saved and reloaded.
+- [ ] Humanoid roles: rig bone → role mapping, saved and reloaded. Per role: a bone to **read** (e.g. Rigify `ORG-`) and a control to **write** (e.g. Rigify FK control).
+- [ ] Default offset mode per role: limbs ROLL (copies the direction), spine and hips REST_OFFSET (Phase 1 finding).
+- [ ] Canonicalize the heading as well as the root position.
+- [ ] Exclude `spikes/` from the extension build.
 - [ ] Neutral types in `core/motion.py`.
 - [ ] Remove or isolate the dead code in `utils.py`.
 
@@ -127,8 +132,8 @@ Hard-coded values and manual steps are fine. **Done when** a short clip goes thr
 | 2026-10-31 | Key poses are read from keyframe types: user keys are any type but `GENERATED`; generated keys are `GENERATED`, in the rig's own action. |
 | 2026-10-31 | Several characters per scene: rig profile on the Armature data, character state on the Object, backend settings in the preferences. |
 
-## Open questions
+| 2026-10-31 | First rig to support: Rigify (FK first, IK in Phase 4). |
 
-- Which rigs to support first (Rigify, Mixamo, custom)? Do the limbs use IK?
+## Open questions
 - Kimodo's code and weights licence, and what it means for distributing the extension.
 - Use GitHub issues for the tasks, or this file only?

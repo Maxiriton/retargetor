@@ -59,7 +59,7 @@ The animation itself is the source of truth: key poses are not stored in a separ
 
 | Where | What | Why |
 |---|---|---|
-| **Armature data** (`bpy.types.Armature`) | The **rig profile**: bone → role mapping, Use Translation flags, which controls are read and written, corrections per backend | It all depends on the bones, which belong to the Armature data. Objects sharing an armature share its profile. |
+| **Armature data** (`bpy.types.Armature`) | The **rig profile**: per role, the bone that is read and the control that is written (they differ on controller rigs, e.g. Rigify `ORG-upper_arm.L` / `upper_arm_fk.L`), offset mode, Use Translation flags, corrections per backend | It all depends on the bones, which belong to the Armature data. Objects sharing an armature share its profile. |
 | **Object** (the character in the shot) | Chosen backend, prompt segments, link to its model armature, generation state | Varies per character, so several characters can live in one scene. |
 | **Add-on preferences** | Backend settings: Python path, model, device | Depends on the machine, not on the file. |
 | **JSON** | Export / import of a rig profile | Reuse a mapping on another similar rig. |
