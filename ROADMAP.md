@@ -13,6 +13,8 @@ The current Retargetor (bone mapping, rest pose offsets, corrections, root motio
 
 **Kimodo** (NVIDIA) is the first model, but it is **not a hard constraint**: the extension must be able to switch to another model when a better one arrives. See [Architecture](#architecture).
 
+Features and data model (keyframe types, where results and settings are stored) are in [DESIGN.md](DESIGN.md).
+
 ## Architecture
 
 ### Principles
@@ -75,7 +77,9 @@ Hard-coded values and manual steps are fine. **Done when** a short clip goes thr
 ### Phase 2: retargeting core refactor
 
 - [ ] Make the retargeting functions independent of `scene.retarget_*` (source, target and mapping passed as arguments).
-- [ ] Allow several mappings per scene (rig → model, model → rig).
+- [ ] Move the rig profile to the Armature data and the per-character state to the Object, so a scene can hold several characters (see DESIGN.md).
+- [ ] Migrate setups saved in `scene.retarget_*`, or document the JSON export / import route.
+- [ ] Check how the rig profile behaves on a rig linked from a library, with library overrides.
 - [ ] Snap and bake on a given list of frames, not only the scene range.
 - [ ] Humanoid roles: rig bone → role mapping, saved and reloaded.
 - [ ] Neutral types in `core/motion.py`.
@@ -88,7 +92,7 @@ Hard-coded values and manual steps are fine. **Done when** a short clip goes thr
 - [ ] Backend interface and JSON worker protocol.
 - [ ] Interpolation backend (pure Python).
 - [ ] Kimodo backend: skeleton, role mapping, conversions, worker running in the Kimodo venv (path set in the add-on preferences).
-- [ ] "Generate in-betweens" operator: collects the key poses, sends them, applies the result, without freezing Blender (timer or modal operator).
+- [ ] "Generate in-betweens" operator: reads the key poses from the user keys (any type but `GENERATED`), sends them, writes the result as `GENERATED` keys in the rig's action, without freezing Blender (timer or modal operator). One undo step.
 - [ ] Frame rate handling (model fps vs scene fps).
 
 **Done when** switching between the interpolation and Kimodo backends needs no code change outside `backends/`.
@@ -97,11 +101,16 @@ Hard-coded values and manual steps are fine. **Done when** a short clip goes thr
 
 - [ ] IK/FK limbs, Rigify.
 - [ ] Never overwrite the user's key poses: only fill the frames between them.
+- [ ] Partial poses: constrain only the keyed controls (end-effectors).
 - [ ] Regenerate a single segment between two keys.
+- [ ] Retype edited `GENERATED` keys as user keys before regenerating.
+- [ ] Test the jumps around key poses; blend if needed.
 
 ### Phase 5: user experience and release
 
-- [ ] Text prompt, root path, end-effector constraints (when the backend supports them).
+- [ ] Prompt segments, visible in the timeline.
+- [ ] Root path drawing (when the backend supports it).
+- [ ] Ghost preview of the model's skeleton (nice-to-have).
 - [ ] Clear error messages, progress and cancel.
 - [ ] Documentation and packaging; choose the final name (it should not contain "Kimodo").
 
@@ -113,10 +122,11 @@ Hard-coded values and manual steps are fine. **Done when** a short clip goes thr
 | 2026-10-31 | First Kimodo model: SOMA (BVH export, best supported). |
 | 2026-10-31 | Kimodo runs natively on Windows in its own venv; no WSL or Docker needed. |
 | 2026-10-31 | The third-party "Kimodo Blender Bridge" add-on is a reference only, not a dependency. |
+| 2026-10-31 | Key poses are read from keyframe types: user keys are any type but `GENERATED`; generated keys are `GENERATED`, in the rig's own action. |
+| 2026-10-31 | Several characters per scene: rig profile on the Armature data, character state on the Object, backend settings in the preferences. |
 
 ## Open questions
 
 - Which rigs to support first (Rigify, Mixamo, custom)? Do the limbs use IK?
-- Scope of the first version: full-body key poses only, or also root paths and text prompts?
 - Kimodo's code and weights licence, and what it means for distributing the extension.
 - Use GitHub issues for the tasks, or this file only?
