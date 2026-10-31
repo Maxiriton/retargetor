@@ -104,6 +104,55 @@ def apply_fk_to_ik(rig, fk, rest):
     bpy.context.view_layer.update()
 
 
+def fk_controls():
+    """FK controls of the limbs, parents first (toes last)."""
+    return [n for chain in IK_CHAINS for n in chain["fk"]] + [c["toe"][0] for c in IK_CHAINS if c["toe"]]
+
+
+def org_name(fk_name):
+    """ORG bone followed by an FK control: upper_arm_fk.L -> ORG-upper_arm.L"""
+    return "ORG-" + fk_name.replace("_fk", "")
+
+
+def snap_fk_to_ik(rig):
+    """Rotate the FK controls so the FK chains match the current IK pose (read from the ORG bones).
+    Only rotations are copied: FK controls keep their own length, so the IK stretch is not carried over."""
+    pbones = rig.pose.bones
+    wanted = {n: pbones[org_name(n)].matrix.to_quaternion() for n in fk_controls()}
+    for name in fk_controls():
+        pb = pbones[name]
+        pb.matrix = Matrix.LocRotScale(pb.matrix.to_translation(), wanted[name], None)
+        bpy.context.view_layer.update()
+
+
+def keyposes_snapshot(rig, frames):
+    """World head positions and directions of the mapped ORG bones at the given frames."""
+    scene = bpy.context.scene
+    snapshot = {}
+    for frame in frames:
+        scene.frame_set(frame)
+        snapshot[frame] = {n: (list(rig.matrix_world @ rig.pose.bones[n].head), list(bone_direction(rig, n)))
+                           for n in RIG_TO_SOMA}
+    return snapshot
+
+
+def compare_to_snapshot(rig, snapshot, label):
+    """Print how far the rig's current animation is from a keyposes_snapshot."""
+    import math
+    scene = bpy.context.scene
+    ends = ["ORG-hand.L", "ORG-hand.R", "ORG-foot.L", "ORG-foot.R", "ORG-shin.L", "ORG-shin.R",
+            "ORG-forearm.L", "ORG-forearm.R", "ORG-spine.006"]
+    for frame, bones in snapshot.items():
+        scene.frame_set(int(frame))
+        angles = {n: math.degrees(Vector(bones[n][1]).angle(bone_direction(rig, n)))
+                  for n in bones if not n.startswith("ORG-spine")}
+        worst = sorted(angles.items(), key=lambda kv: -kv[1])[:3]
+        dists = {n: ((rig.matrix_world @ rig.pose.bones[n].head) - Vector(bones[n][0])).length * 100 for n in ends}
+        print(f"{label} frame {frame}: limb directions mean {sum(angles.values()) / len(angles):.2f} deg, "
+              f"worst {', '.join(f'{n} {a:.2f}' for n, a in worst)}")
+        print(f"{label}   positions (cm): {', '.join(f'{n} {d:.2f}' for n, d in dists.items())}")
+
+
 def ik_controls():
     names = []
     for chain in IK_CHAINS:

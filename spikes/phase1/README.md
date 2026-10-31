@@ -34,11 +34,26 @@ Same key poses, animated with **IK controls only** (`hand_ik`, `foot_ik`, `toe_i
 
 Things tried that did **not** help: rotating the pole around the limb axis to minimize the elbow/knee error (no gain, the pole wasn't the cause), and turning off the rig's `IK_Stretch` slider.
 
+### Retained approach: stay in FK (2026-10-31)
+
+Writing to IK controls brings the stretch errors above, so it is dropped. Instead, when the rig is posed in IK, **the FK controls are snapped to the IK pose** on the key frames (rotations copied from the `ORG-` bones), and the limbs are switched to FK. From there the chain only reads and writes FK. The user's IK keys are kept.
+
+| Step | Result |
+|---|---|
+| FK snap vs the IK key poses | **Exact**: 0.00°, 0.00 cm |
+| Rig → SOMA, generation | Exact, as in FK |
+| Result vs the **original IK key poses** | Limb directions **0.00°**. Positions within 0.5 cm: the IK pose has slightly shrunk bones (Rigify's `ik_stretch`), FK keeps the true lengths. |
+| Over the whole clip | 0.05° mean (max 1.8°), as in pure FK. Feet on the floor. |
+
+Scripts: `make_rig_ik2fk.py` (snap and switch, saves the IK reference), `compare_keyposes.py` (compares a result with that reference). Outputs in `out/ik2fk/`.
+
+Consequence: after generation the limbs play in FK. How the result is presented to an animator who works in IK (switch animated, or snapped back to IK on request) is an open point in DESIGN.md.
+
 ## What goes wrong, or needs work
 
 1. **REST_OFFSET copies the rotation from rest, not the direction.** When the two rest poses differ (Rigify's arms slope down, SOMA is in a T-pose), the limbs are off by the rest difference. ROLL mode copies the direction and only corrects the twist, which is right for limbs. The spine works in REST_OFFSET (both rigs stand upright at rest, and their spine bones are laid out differently). → Each humanoid role needs a **default offset mode** (limbs ROLL, spine and hips REST_OFFSET).
 2. **Reading and writing use different bones.** The pose is read from Rigify's `ORG-` bones (the result of FK/IK), but written to the FK controls (`upper_arm_fk.L`, `torso`, …). → The rig profile needs, per role, **a bone to read and a control to write**.
-3. **IK needs an extra step on the write side.** Reading works in FK and IK alike. Writing goes through the FK chain, then an FK → IK transfer per frame (see the IK test above). This transfer is rig-specific (Rigify's controls, poles, switch properties): the rig profile will need to describe it.
+3. **IK rigs: snap FK to IK, then stay in FK.** Reading works in FK and IK alike, but writing to IK controls is inexact (see the IK test above). So FK is snapped to the IK key poses and the whole chain works in FK. The snap is rig-specific (which FK control follows which bone, the IK/FK switch property): the rig profile will need to describe it.
 4. **Spine partly written.** Only `torso` (Hips, with translation), `chest`, `neck` and `head` are written; Spine1 and Spine2 are left to Rigify's chest interpolation. Exact at the key poses, not measured in between.
 5. **Heading not handled.** The rig faces -Y, which happens to be Kimodo's default heading. A character facing another way needs its heading canonicalized (rotation around the vertical axis, or Kimodo's `first_heading_angle`), like the root position already is.
 6. **Frame rate.** The scene was set to 30 fps, Kimodo's rate. Other rates need resampling.
@@ -53,6 +68,8 @@ Things tried that did **not** help: rotating the pole around the limb axis to mi
 |---|---|---|
 | `make_rig.py` | Blender 5.1 | Generates the Rigify rig in FK and keys the three poses → `out/rig_keyposes.blend` |
 | `make_rig_ik.py` | Blender 5.1 | Turns those poses into IK-only key poses → `out/rig_keyposes_ik.blend` |
+| `make_rig_ik2fk.py` | Blender 5.1 | Snaps FK to the IK key poses and switches to FK → `out/ik2fk/rig_keyposes_ik2fk.blend` |
+| `compare_keyposes.py` | Blender 5.1 | Compares a result with the original IK key poses |
 | `rig_to_soma.py` | Blender 5.1 | Snaps SOMA to the key poses with the Retargetor, measures it, writes `out/constraints.json` and `out/canonical.json` |
 | `soma_to_rig.py` | Blender 5.1 | Imports the generated BVH, retargets it onto the FK controls (then onto the IK controls with `ik`), compares the key poses → `result.blend` |
 | `check_result.py` | Blender 5.1 | Checks the bake over the whole clip (keys, fidelity, floor contact) |
@@ -83,4 +100,15 @@ mkdir -p out/ik
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $K/Scripts/kimodo_gen.exe "A person walks forward and raises both arms" --model Kimodo-SOMA-RP-v1.1 --duration 4.0 --constraints out/ik/constraints.json --output out/ik/generated --bvh --bvh_standard_tpose --seed 1
 "$B" -b --factory-startup out/rig_keyposes_ik.blend --python soma_to_rig.py -- out/ik out/ik/generated.bvh ik 1 61 120
 "$B" -b --factory-startup out/ik/result.blend --python check_result.py
+```
+
+Retained FK-only approach, after `make_rig_ik.py`:
+
+```bash
+mkdir -p out/ik2fk
+"$B" -b --factory-startup out/rig_keyposes_ik.blend --python make_rig_ik2fk.py -- out/ik2fk 1 61 120
+"$B" -b --factory-startup out/ik2fk/rig_keyposes_ik2fk.blend --python rig_to_soma.py -- out/ik2fk roll 1 61 120
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $K/Scripts/kimodo_gen.exe "A person walks forward and raises both arms" --model Kimodo-SOMA-RP-v1.1 --duration 4.0 --constraints out/ik2fk/constraints.json --output out/ik2fk/generated --bvh --bvh_standard_tpose --seed 1
+"$B" -b --factory-startup out/ik2fk/rig_keyposes_ik2fk.blend --python soma_to_rig.py -- out/ik2fk out/ik2fk/generated.bvh fk 1 61 120
+"$B" -b --factory-startup out/ik2fk/result.blend --python compare_keyposes.py -- out/ik2fk/ik_reference.json
 ```
