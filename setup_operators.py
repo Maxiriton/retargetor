@@ -349,9 +349,9 @@ class RTGTR_import_retarget_json(Operator, ImportHelper):
         return {'FINISHED'}
 
 
-class RTGTR_OT_RecordAdjustement(Operator):
+class RTGTR_OT_RecordAdjustment(Operator):
     """Record an extra rotation offset for the current selected bone"""
-    bl_idname = "retargetor.record_adjustement"
+    bl_idname = "retargetor.record_adjustment"
     bl_label = "Record Adjustment"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -448,7 +448,7 @@ classes = (
     RTGTR_OT_AutoTranslationScale,
     RTGTR_Record_to_json,
     RTGTR_import_retarget_json,
-    RTGTR_OT_RecordAdjustement,
+    RTGTR_OT_RecordAdjustment,
     RTGTR_OT_FinishRecord,
     RTGTR_OT_ClearRecord
 )

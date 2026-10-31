@@ -98,7 +98,7 @@ class RTGTR_UL_Bones(UIList):
             )
         elif item.has_corrective_offset:
             row2.operator(
-                "retargetor.record_adjustement",
+                "retargetor.record_adjustment",
                 text="Update Record",
                 icon='ARMATURE_DATA'
             )
@@ -109,7 +109,7 @@ class RTGTR_UL_Bones(UIList):
             )
         else:
             row2.operator(
-                "retargetor.record_adjustement",
+                "retargetor.record_adjustment",
                 text="Record Correction",
                 icon='ARMATURE_DATA'
             )

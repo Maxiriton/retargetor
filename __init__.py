@@ -134,13 +134,13 @@ def register_retarget_properties():
 
     bpy.types.Scene.retarget_source_armature = bpy.props.PointerProperty(
         type=bpy.types.Object,
-        name="Armature Source",
+        name="Source Armature",
         poll=lambda self, obj: obj.type == 'ARMATURE'
     )
 
     bpy.types.Scene.retarget_target_armature = bpy.props.PointerProperty(
         type=bpy.types.Object,
-        name="Armature Target",
+        name="Target Armature",
         poll=lambda self, obj: obj.type == 'ARMATURE'
     )
 
