@@ -59,11 +59,13 @@ ui/
 
 ### Phase 0: check the model works
 
-- [ ] Generate a motion with a full-body keyframe constraint from the Kimodo venv (`kimodo_gen`), get the NPZ and the BVH.
-- [ ] Import the SOMA skeleton in Blender (BVH, standard T-pose) and save it as the reference armature.
-- [ ] Round-trip test: Kimodo motion → constraints built from the Blender armature → compare with the NPZ rotations.
+- [x] Generate a motion with a full-body keyframe constraint from the Kimodo venv (`kimodo_gen`), get the NPZ and the BVH.
+- [x] Import the SOMA skeleton in Blender (BVH, standard T-pose) and save it as the reference armature.
+- [x] Round-trip test: Kimodo motion → constraints built from the Blender armature → compare with the NPZ rotations.
 
 **Done when** a pose made on the SOMA armature in Blender comes out unchanged in the generated motion.
+
+**Done (2026-10-31).** Every conversion matches exactly; generation takes about 23 s and 6.8 GB of video memory. Results, confirmed conventions and one trap (hand end joints) are in [spikes/phase0/README.md](spikes/phase0/README.md). Generating from a pose made by hand in Blender is left to Phase 1.
 
 ### Phase 1: rough end-to-end prototype
 

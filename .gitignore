@@ -221,3 +221,6 @@ __marimo__/
 
 # Claude Code local notes (machine-specific paths)
 CLAUDE.local.md
+
+# Spike outputs (generated motions, test scenes)
+spikes/*/out/
