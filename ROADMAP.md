@@ -106,7 +106,7 @@ Hard-coded values and manual steps are fine. **Done when** a short clip goes thr
 
 ### Phase 4: controller rigs
 
-- [ ] IK/FK limbs, Rigify: when a limb is posed in IK, snap its FK controls to the IK pose on the key frames, then work in FK only (tested in Phase 1: exact). Describe the snap in the rig profile (FK control ↔ followed bone, IK/FK switch property). Decide how the result is shown to an animator who works in IK.
+- [ ] IK/FK limbs, Rigify: when a limb is posed in IK, snap its FK controls to the IK pose on the key frames, then work in FK only (tested in Phase 1: exact). Describe the snap in the rig profile (FK control ↔ followed bone, IK/FK switch property). After generation the limbs play in FK; revisit with usage.
 - [ ] Never overwrite the user's key poses: only fill the frames between them.
 - [ ] Partial poses: constrain only the keyed controls (end-effectors).
 - [ ] Regenerate a single segment between two keys.
@@ -133,7 +133,7 @@ Hard-coded values and manual steps are fine. **Done when** a short clip goes thr
 | 2026-10-31 | Several characters per scene: rig profile on the Armature data, character state on the Object, backend settings in the preferences. |
 
 | 2026-10-31 | First rig to support: Rigify (FK first, IK in Phase 4). |
-| 2026-10-31 | Generated motion is always written to FK controls. Limbs posed in IK get their FK controls snapped to the IK pose first; no writing to IK controls (Rigify's IK stretch makes it inexact). |
+| 2026-10-31 | Generated motion is always written to FK controls. Limbs posed in IK get their FK controls snapped to the IK pose first; no writing to IK controls (Rigify's IK stretch makes it inexact). After generation the limbs simply play in FK, for now. |
 
 ## Open questions
 - Kimodo's code and weights licence, and what it means for distributing the extension.
