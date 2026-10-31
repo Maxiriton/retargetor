@@ -25,7 +25,7 @@ Retargetor is a Blender add-on that copies an animation bone by bone from a *sou
 
 ## Requirements
 
-- Blender **5.1** or newer.
+- Blender **5.2** or newer.
 
 ## Installation
 

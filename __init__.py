@@ -18,7 +18,7 @@ bl_info = {
     "name": "Retargetor",
     "author": "Henri Hebeisen",
     "description": "Retarget animation between armatures with different rest poses",
-    "blender": (5, 1, 0),
+    "blender": (5, 2, 0),
     "version": (0, 0, 1),
     "location": "View3D > Sidebar > Retarget Tool",
     "warning": "",

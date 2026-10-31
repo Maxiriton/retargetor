@@ -137,6 +137,7 @@ A correction to Phase 1: the spike's "FK snap vs IK pose: 0.00 cm" was measured 
 | 2026-10-31 | The third-party "Kimodo Blender Bridge" add-on is a reference only, not a dependency. |
 | 2026-10-31 | Key poses are read from keyframe types: user keys are any type but `GENERATED`; generated keys are `GENERATED`, in the rig's own action. |
 | 2026-10-31 | Several characters per scene: rig profile on the Armature data, character state on the Object, backend settings in the preferences. |
+| 2026-10-31 | Minimum Blender version raised to 5.2 (LTS). Phase 0 and 1 spikes were run on 5.1. |
 
 | 2026-10-31 | First rig to support: Rigify (FK first, IK in Phase 4). |
 | 2026-10-31 | Generated motion is always written to FK controls. Limbs posed in IK get their FK controls snapped to the IK pose first; no writing to IK controls (Rigify's IK stretch makes it inexact). After generation the limbs simply play in FK, for now. |

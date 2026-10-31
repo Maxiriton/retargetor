@@ -2,7 +2,7 @@
 
 ## Project
 
-Retargetor is a Blender extension (Blender 5.1+) that retargets animation between armatures with different rest poses. It is the first piece of a larger extension: the user poses their own rig, an AI motion model generates the movement between the key poses, and the result comes back onto the rig. Read [ROADMAP.md](ROADMAP.md) for the goal, the architecture, the phases and the decisions.
+Retargetor is a Blender extension (Blender 5.2+) that retargets animation between armatures with different rest poses. It is the first piece of a larger extension: the user poses their own rig, an AI motion model generates the movement between the key poses, and the result comes back onto the rig. Read [ROADMAP.md](ROADMAP.md) for the goal, the architecture, the phases and the decisions.
 
 ## Architecture rules
 
@@ -41,7 +41,7 @@ The core takes its inputs as arguments; only the operators read the panel's char
 ## Testing
 
 - All tests: `python tests/run_tests.py --spikes <folder with phase0/out and phase1/out>` (the chain tests need the spike outputs, which are not committed).
-- Headless: `"C:\Program Files\Blender Foundation\Blender 5.1\blender.exe" -b --factory-startup <file.blend> --python <script.py>`. The `blender` on PATH is 5.0, which is too old for this extension.
+- Headless: `"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b --factory-startup <file.blend> --python <script.py>`. The `blender` on PATH is 5.0, which is too old for this extension.
 - Setting a custom property from Python doesn't tag the object: call `obj.update_tag()` before reading anything driven by it (Rigify's IK/FK switch).
 - Live inspection goes through the Blender MCP connector; it needs Blender running with the MCP add-on server started.
 - Machine-specific paths (Kimodo venv, test files) are in `CLAUDE.local.md`, which is not committed.

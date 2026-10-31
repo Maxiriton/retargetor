@@ -2,7 +2,7 @@
 
     python tests/run_tests.py [--blender <blender.exe>] [--spikes <folder with phase0/out and phase1/out>]
 
-Blender 5.1+ is needed (default: the BLENDER environment variable, else the standard Windows install path).
+Blender 5.2+ is needed (default: the BLENDER environment variable, else the standard Windows install path).
 The chain tests need the spike outputs (not committed): they are skipped when missing. Default: spikes/ in this
 repository, or the RETARGETOR_SPIKES environment variable.
 The migration test builds a legacy file with the add-on as it was before Phase 2 (commit LEGACY_COMMIT).
@@ -16,7 +16,7 @@ import unittest
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BLENDER_TESTS = os.path.join(REPO, "tests", "blender")
-DEFAULT_BLENDER = r"C:\Program Files\Blender Foundation\Blender 5.1\blender.exe"
+DEFAULT_BLENDER = r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 # Last commit before the Phase 2 refactor: its add-on stores the setup in scene.retarget_*
 LEGACY_COMMIT = "62864b7"
 LEGACY_FILES = ["__init__.py", "setup_operators.py", "retarget_operators.py", "ui.py"]
