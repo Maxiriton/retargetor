@@ -1,0 +1,29 @@
+{
+    "_comment": "Test fixture only: the SOMA skeleton's role -> joint map, as used in the Phase 1 spike. Moves into backends/kimodo/ in Phase 3.",
+    "root_joint": "Hips",
+    "joints": {
+        "hips": "Hips",
+        "spine": "Spine1",
+        "chest": "Spine2",
+        "upper_chest": "Chest",
+        "neck": "Neck1",
+        "upper_neck": "Neck2",
+        "head": "Head",
+        "shoulder.L": "LeftShoulder",
+        "upper_arm.L": "LeftArm",
+        "forearm.L": "LeftForeArm",
+        "hand.L": "LeftHand",
+        "thigh.L": "LeftLeg",
+        "shin.L": "LeftShin",
+        "foot.L": "LeftFoot",
+        "toes.L": "LeftToeBase",
+        "shoulder.R": "RightShoulder",
+        "upper_arm.R": "RightArm",
+        "forearm.R": "RightForeArm",
+        "hand.R": "RightHand",
+        "thigh.R": "RightLeg",
+        "shin.R": "RightShin",
+        "foot.R": "RightFoot",
+        "toes.R": "RightToeBase"
+    }
+}

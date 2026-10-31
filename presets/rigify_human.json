@@ -1,0 +1,281 @@
+{
+    "name": "Rigify human (FK controls)",
+    "format": "retargetor.rig_profile",
+    "version": 1,
+    "roles": [
+        {
+            "role": "hips",
+            "read_bone": "ORG-spine",
+            "write_bone": "torso",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": true,
+            "corrections": {}
+        },
+        {
+            "role": "spine",
+            "read_bone": "ORG-spine.001",
+            "write_bone": "",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "chest",
+            "read_bone": "ORG-spine.002",
+            "write_bone": "",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "upper_chest",
+            "read_bone": "ORG-spine.003",
+            "write_bone": "chest",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "neck",
+            "read_bone": "ORG-spine.004",
+            "write_bone": "neck",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "upper_neck",
+            "read_bone": "ORG-spine.005",
+            "write_bone": "",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "head",
+            "read_bone": "ORG-spine.006",
+            "write_bone": "head",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "shoulder.L",
+            "read_bone": "ORG-shoulder.L",
+            "write_bone": "shoulder.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "upper_arm.L",
+            "read_bone": "ORG-upper_arm.L",
+            "write_bone": "upper_arm_fk.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "forearm.L",
+            "read_bone": "ORG-forearm.L",
+            "write_bone": "forearm_fk.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "hand.L",
+            "read_bone": "ORG-hand.L",
+            "write_bone": "hand_fk.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "shoulder.R",
+            "read_bone": "ORG-shoulder.R",
+            "write_bone": "shoulder.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "upper_arm.R",
+            "read_bone": "ORG-upper_arm.R",
+            "write_bone": "upper_arm_fk.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "forearm.R",
+            "read_bone": "ORG-forearm.R",
+            "write_bone": "forearm_fk.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "hand.R",
+            "read_bone": "ORG-hand.R",
+            "write_bone": "hand_fk.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "thigh.L",
+            "read_bone": "ORG-thigh.L",
+            "write_bone": "thigh_fk.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "shin.L",
+            "read_bone": "ORG-shin.L",
+            "write_bone": "shin_fk.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "foot.L",
+            "read_bone": "ORG-foot.L",
+            "write_bone": "foot_fk.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "toes.L",
+            "read_bone": "ORG-toe.L",
+            "write_bone": "toe_fk.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "thigh.R",
+            "read_bone": "ORG-thigh.R",
+            "write_bone": "thigh_fk.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "shin.R",
+            "read_bone": "ORG-shin.R",
+            "write_bone": "shin_fk.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "foot.R",
+            "read_bone": "ORG-foot.R",
+            "write_bone": "foot_fk.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "toes.R",
+            "read_bone": "ORG-toe.R",
+            "write_bone": "toe_fk.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        }
+    ],
+    "limbs": [
+        {
+            "name": "arm.L",
+            "switch_bone": "upper_arm_parent.L",
+            "switch_property": "IK_FK",
+            "fk_value": 1.0,
+            "controls": [
+                [
+                    "upper_arm_fk.L",
+                    "ORG-upper_arm.L"
+                ],
+                [
+                    "forearm_fk.L",
+                    "ORG-forearm.L"
+                ],
+                [
+                    "hand_fk.L",
+                    "ORG-hand.L"
+                ]
+            ]
+        },
+        {
+            "name": "arm.R",
+            "switch_bone": "upper_arm_parent.R",
+            "switch_property": "IK_FK",
+            "fk_value": 1.0,
+            "controls": [
+                [
+                    "upper_arm_fk.R",
+                    "ORG-upper_arm.R"
+                ],
+                [
+                    "forearm_fk.R",
+                    "ORG-forearm.R"
+                ],
+                [
+                    "hand_fk.R",
+                    "ORG-hand.R"
+                ]
+            ]
+        },
+        {
+            "name": "leg.L",
+            "switch_bone": "thigh_parent.L",
+            "switch_property": "IK_FK",
+            "fk_value": 1.0,
+            "controls": [
+                [
+                    "thigh_fk.L",
+                    "ORG-thigh.L"
+                ],
+                [
+                    "shin_fk.L",
+                    "ORG-shin.L"
+                ],
+                [
+                    "foot_fk.L",
+                    "ORG-foot.L"
+                ],
+                [
+                    "toe_fk.L",
+                    "ORG-toe.L"
+                ]
+            ]
+        },
+        {
+            "name": "leg.R",
+            "switch_bone": "thigh_parent.R",
+            "switch_property": "IK_FK",
+            "fk_value": 1.0,
+            "controls": [
+                [
+                    "thigh_fk.R",
+                    "ORG-thigh.R"
+                ],
+                [
+                    "shin_fk.R",
+                    "ORG-shin.R"
+                ],
+                [
+                    "foot_fk.R",
+                    "ORG-foot.R"
+                ],
+                [
+                    "toe_fk.R",
+                    "ORG-toe.R"
+                ]
+            ]
+        }
+    ]
+}
