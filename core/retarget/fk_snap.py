@@ -68,6 +68,9 @@ def set_limbs_fk(rig_obj, limbs, view_layer, frames=(), keytype='KEYFRAME'):
         if animated:
             for frame in frames:
                 switch.keyframe_insert(f'["{limb.switch_property}"]', frame=frame, keytype=keytype)
+    # Setting a custom property doesn't tag the object: without this, the drivers reading the switch
+    # (Rigify's constraint influences) keep their old value until something else updates the rig
+    rig_obj.update_tag()
     view_layer.update()
 
 
