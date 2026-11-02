@@ -1,11 +1,14 @@
 """Run every test: the plain-Python unit tests, then the headless Blender tests.
 
     python tests/run_tests.py [--blender <blender.exe>] [--spikes <folder with phase0/out and phase1/out>]
+                              [--kimodo-python <Kimodo venv python.exe>]
 
 Blender 5.2+ is needed (default: the BLENDER environment variable, else the standard Windows install path).
 The unit tests run with Blender's own Python (it has numpy), found next to blender.exe.
 The chain tests need the spike outputs (not committed): they are skipped when missing. Default: spikes/ in this
 repository, or the RETARGETOR_SPIKES environment variable.
+The Kimodo tests run only with --kimodo-python (or the RETARGETOR_KIMODO_PYTHON environment variable): the
+conversions against Kimodo itself, then generations on the GPU (a few minutes).
 The migration test builds a legacy file with the add-on as it was before Phase 2 (commit LEGACY_COMMIT).
 """
 import argparse
@@ -54,6 +57,31 @@ def run_unit_tests(python):
     return result.returncode == 0
 
 
+def run_kimodo_tests(args, env, scratch, rig_file):
+    """Kimodo: conversions against Kimodo itself (no GPU), then generations on the Phase 1 rig (GPU)"""
+    results = {}
+    command = [args.kimodo_python, "-I", os.path.join(REPO, "tests", "kimodo", "test_kimodo_reference.py")]
+    result = subprocess.run(command, capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
+    print(result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "")
+    if result.returncode != 0:
+        print(result.stderr[-3000:])
+    results["kimodo_reference"] = result.returncode == 0
+
+    out_dir = os.path.join(scratch, "kimodo")
+    os.makedirs(out_dir)
+    base_args = ["base", args.kimodo_python, out_dir]
+    spike_result = os.path.join(args.spikes, "phase1", "out", "result.blend")
+    if os.path.exists(spike_result):
+        dump = os.path.join(out_dir, "spike_rig_result.json")
+        run_blender(args.blender, "dump_pose.py", ["rig", dump, "1", "120"], blend=spike_result)
+        base_args.append(dump)
+    results["kimodo_base"] = run_blender(args.blender, "test_generate_kimodo.py", base_args, blend=rig_file, env=env)
+    for mode in ("heading", "fps24"):
+        results[f"kimodo_{mode}"] = run_blender(args.blender, "test_generate_kimodo.py",
+                                                [mode, args.kimodo_python, out_dir], blend=rig_file, env=env)
+    return results
+
+
 def extract_legacy_addon(folder):
     archive = subprocess.run(["git", "-C", REPO, "archive", LEGACY_COMMIT, "--"] + LEGACY_FILES,
                              capture_output=True, check=True).stdout
@@ -67,6 +95,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--blender", default=os.environ.get("BLENDER", DEFAULT_BLENDER))
     parser.add_argument("--spikes", default=os.environ.get("RETARGETOR_SPIKES", os.path.join(REPO, "spikes")))
+    parser.add_argument("--kimodo-python", default=os.environ.get("RETARGETOR_KIMODO_PYTHON"))
     args = parser.parse_args()
 
     results = {}
@@ -85,9 +114,9 @@ def main():
         rig_dir = os.path.join(scratch, "rig")
         os.makedirs(rig_dir)
         run_blender(args.blender, os.path.join(REPO, "spikes", "phase1", "make_rig.py"), [rig_dir])
-        rig_file = os.path.join(rig_dir, "rig_keyposes.blend")
-        if os.path.exists(rig_file):
-            results["generate"] = run_blender(args.blender, "test_generate.py", blend=rig_file, env=env)
+        test_rig = os.path.join(rig_dir, "rig_keyposes.blend")
+        if os.path.exists(test_rig):
+            results["generate"] = run_blender(args.blender, "test_generate.py", blend=test_rig, env=env)
         else:
             print("generate: the test rig could not be made (spikes/phase1/make_rig.py)")
             results["generate"] = False
@@ -118,6 +147,9 @@ def main():
                         blend=os.path.join(spike_dir, "result.blend"))
             results[f"chain_{mode}"] = run_blender(args.blender, "test_chain.py", [mode, spike_dir, reference],
                                                    blend=os.path.join(phase1, rig_file), env=env)
+
+        if args.kimodo_python and os.path.exists(test_rig):
+            results.update(run_kimodo_tests(args, env, scratch, test_rig))
 
     print("\nSummary:")
     for name, ok in results.items():

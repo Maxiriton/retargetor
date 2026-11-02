@@ -5,7 +5,8 @@ Each backend adapter converts to and from its model's own conventions.
 
 Joint rotations are expressed relative to the joint's rest orientation, in world space: the rotation that
 takes the joint from its rest orientation to its posed orientation. This doesn't depend on bone rolls, so
-it can be read from one armature and written to another one with the same joints.
+it can be read from one armature and written to another one with the same joints. For a generation, "world"
+is the model armature's own space (the character's space, see generation.place_model).
 """
 from __future__ import annotations
 

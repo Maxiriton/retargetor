@@ -9,6 +9,7 @@ import re
 import time
 
 import bpy
+from mathutils import Matrix
 
 from .backends import process, protocol, registry
 from .core import profile as core_profile
@@ -195,18 +196,20 @@ def remove_model_armature(obj):
 
 
 def place_model(model, rig, view_layer):
-    """At the rig's location, not rotated and at rest, without animation. Rotations from rest are in world
-    space, so the model's rest pose must keep the backend's own orientation."""
+    """Where the rig is, turned like it (not scaled), at rest and without animation. The model's poses are read
+    and written in its own armature space: the motion is generated in the character's space, so moving or
+    turning the rig object moves or turns the result the same way."""
     if model.animation_data is not None and model.animation_data.action is not None:
+        action = model.animation_data.action
         model.animation_data.action = None
+        if action.users == 0:
+            bpy.data.actions.remove(action)
     for pose_bone in model.pose.bones:
         pose_bone.rotation_mode = 'QUATERNION'
         pose_bone.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
         pose_bone.location = (0.0, 0.0, 0.0)
-    model.rotation_mode = 'XYZ'
-    model.location = rig.matrix_world.to_translation()
-    model.rotation_euler = (0.0, 0.0, 0.0)
-    model.scale = (1.0, 1.0, 1.0)
+    rotation = rig.matrix_world.to_3x3().normalized().to_quaternion()
+    model.matrix_world = Matrix.LocRotScale(rig.matrix_world.to_translation(), rotation, None)
     view_layer.update()
 
 
@@ -232,7 +235,7 @@ def build_request(context, rig, model, backend, rig_profile, key_frames, prompt=
         for frame in key_frames:
             scene.frame_set(frame)
             retargeter.snap_pose(view_layer)
-            key_poses[frame] = read_pose(model, skeleton.names, skeleton.root)
+            key_poses[frame] = read_pose(model, skeleton.names, skeleton.root, world=False)
     finally:
         scene.frame_set(original_frame)
 
@@ -253,7 +256,7 @@ def apply_motion(context, rig, model, backend, rig_profile, motion, key_frames, 
     if motion.start_frame > start or motion.end_frame < end:
         raise ValueError(f"The backend returned frames {motion.start_frame}-{motion.end_frame}, "
                          f"{start}-{end} were asked.")
-    write_motion_fcurves(model, motion, root_joint=skeleton.root, action_name=f"{model.name}_motion")
+    write_motion_fcurves(model, motion, root_joint=skeleton.root, action_name=f"{model.name}_motion", world=False)
     view_layer.update()
 
     pairs = core_profile.compose(rig_profile, backend.joint_map, core_profile.FROM_MODEL, backend=backend.id)

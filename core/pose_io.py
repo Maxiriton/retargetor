@@ -13,26 +13,33 @@ def _world_rest(armature_obj, bone):
     return (armature_obj.matrix_world @ bone.matrix_local).to_3x3().normalized()
 
 
-def read_pose(armature_obj, joints=None, root_joint=None):
-    """The armature's current pose as a Pose: rotations from rest in world space, root head position.
-    joints: names to read (all bones if None). Raises KeyError for an unknown joint."""
+def _space(armature_obj, world):
+    """The matrix taking armature space to the space poses are expressed in"""
+    return armature_obj.matrix_world if world else Matrix.Identity(4)
+
+
+def read_pose(armature_obj, joints=None, root_joint=None, world=True):
+    """The armature's current pose as a Pose: rotations from rest and root head position, in world space
+    (or in the armature's own space if world is False). joints: names to read (all bones if None).
+    Raises KeyError for an unknown joint."""
     pose_bones = armature_obj.pose.bones
     names = list(joints) if joints is not None else [pb.name for pb in pose_bones]
+    space = _space(armature_obj, world)
     rotations = {}
     for name in names:
         pb = pose_bones.get(name)
         if pb is None:
             raise KeyError(f"The joint '{name}' does not exist in the armature '{armature_obj.name}'.")
-        posed = (armature_obj.matrix_world @ pb.matrix).to_3x3().normalized()
-        q = (posed @ _world_rest(armature_obj, pb.bone).transposed()).to_quaternion()
-        rotations[name] = tuple(q)
+        posed = (space @ pb.matrix).to_3x3().normalized()
+        rest = (space @ pb.bone.matrix_local).to_3x3().normalized()
+        rotations[name] = tuple((posed @ rest.transposed()).to_quaternion())
 
     root_position = None
     if root_joint is not None:
         pb = pose_bones.get(root_joint)
         if pb is None:
             raise KeyError(f"The root joint '{root_joint}' does not exist in the armature '{armature_obj.name}'.")
-        root_position = tuple(armature_obj.matrix_world @ pb.head)
+        root_position = tuple(space @ pb.head)
     return Pose(rotations, root_position)
 
 
@@ -142,7 +149,7 @@ def _write_fcurve(fcurves, data_path, index, group, frames, values):
     fcurve.update()
 
 
-def write_motion_fcurves(armature_obj, motion, root_joint=None, action_name=None):
+def write_motion_fcurves(armature_obj, motion, root_joint=None, action_name=None, world=True):
     """Replace the armature's animation with a Motion, written straight into F-curves (linear keys on every
     frame). Much faster than write_motion: local rotations are computed from the rotations from rest, with no
     scene update. Every pose must list the same joints; bones missing from the poses keep their rest pose
@@ -161,7 +168,8 @@ def write_motion_fcurves(armature_obj, motion, root_joint=None, action_name=None
     rotations = np.array([[pose.rotations[name] for name in joints] for pose in poses], dtype=np.float64)
     given = {name: rotations[:, i] for i, name in enumerate(joints)}
 
-    world_rotation = armature_obj.matrix_world.to_3x3().normalized().to_quaternion()
+    space = _space(armature_obj, world)
+    world_rotation = space.to_3x3().normalized().to_quaternion()
     frames = np.arange(motion.start_frame, motion.start_frame + len(poses), dtype=np.float64)
     identity = np.tile((1.0, 0.0, 0.0, 0.0), (len(poses), 1))
 
@@ -195,7 +203,7 @@ def write_motion_fcurves(armature_obj, motion, root_joint=None, action_name=None
         if bone.parent is not None:
             raise ValueError(f"The root joint '{root_joint}' must be a bone without parent.")
         positions = np.array([pose.root_position for pose in poses], dtype=np.float64)
-        to_armature = np.array(armature_obj.matrix_world.inverted())
+        to_armature = np.array(space.inverted())
         positions = positions @ to_armature[:3, :3].T + to_armature[:3, 3]
         rest = np.array(bone.matrix_local.to_quaternion())
         location = quat.rotate(quat.conjugate(rest), positions - np.array(bone.head_local))

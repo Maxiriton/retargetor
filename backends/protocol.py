@@ -141,8 +141,8 @@ class WorkerLoop:
         load(context)                       load the model (optional: default does nothing)
         generate(request, context)          GenerationRequest; sends frames with context.send_frames
     stdin is read by a thread, so a "cancel" arrives while a generation runs; requests are handled one at a
-    time, in order. The protocol uses a copy of the real stdout: anything else printed (by the model's
-    libraries, even from C code) goes to stderr, so it can't break the protocol.
+    time, in order. The protocol uses copies of the real stdin and stdout: anything else printed (by the
+    model's libraries, even from C code) goes to stderr, so it can't break the protocol.
     """
 
     def __init__(self, backend_id, handler):
@@ -155,6 +155,18 @@ class WorkerLoop:
         self._out = os.fdopen(os.dup(1), "w", encoding="utf-8", newline="\n")
         os.dup2(2, 1)
         sys.stdout = sys.stderr
+        # Requests are read from a private copy of stdin; everything else gets an empty stdin. On Windows a read
+        # waiting on a pipe blocks any other use of that pipe, and some DLLs query the standard handles when
+        # they load (scipy's BLAS, imported by Kimodo): with the real stdin, they would wait forever.
+        self._in = os.fdopen(os.dup(0), "rb")
+        null = os.open(os.devnull, os.O_RDONLY)
+        os.dup2(null, 0)
+        os.close(null)
+        if sys.platform == "win32":
+            import ctypes
+            import msvcrt
+            ctypes.windll.kernel32.SetStdHandle(-10, msvcrt.get_osfhandle(0))  # STD_INPUT_HANDLE
+        sys.stdin = open(os.devnull, encoding="utf-8")
 
     def send(self, message):
         with self._lock:
@@ -162,7 +174,7 @@ class WorkerLoop:
             self._out.flush()
 
     def _read_stdin(self):
-        for raw in sys.stdin.buffer:
+        for raw in self._in:
             line = raw.decode("utf-8").strip()
             if not line:
                 continue
