@@ -21,7 +21,7 @@ The animation itself is the source of truth: key poses are not stored in a separ
 - **Unmapped channels** (face, props, custom properties) are never touched.
 - **Partial poses constrain only what is keyed**: the request lists the joints of the roles keyed on the frame (a role is keyed when its write control, or an IK control of its limb, has a user key there); the backend declares whether it honours them. Kimodo turns them into its end-effector constraints: a keyed arm pins the hand, a keyed leg the foot, the hips alone the hips; the spine, neck or head keyed pin the whole body. Kimodo always pins the hips on a constrained frame.
 - **Writing is per control**: on a key frame, the controls the user keyed keep their keys and are not snapped; the other controls of that frame are generated.
-- **To revisit**: the keyed limb keeps its FK keys (local rotations) on a body that is generated there, so the hand or foot lands where those rotations put it on the new body, not where the model put it (20 cm away in the Kimodo test, the torso turned 18°). Kimodo itself hits the end-effector exactly.
+- **The keyed limb keeps its FK keys** (local rotations) on a body that is generated there, so the hand or foot lands where those rotations put it on the new body, not where the model put it (20 cm away in the Kimodo test, the torso turned 18°; Kimodo itself hits the end-effector exactly). Decided: the keys are the animator's; to keep the whole pose, key the body too.
 
 ## IK and FK
 
