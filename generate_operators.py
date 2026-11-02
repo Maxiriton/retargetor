@@ -39,7 +39,7 @@ def _character(context):
 def _report_result(operator, task):
     frames, removed = task.result
     timings = ", ".join(f"{name} {seconds:.1f} s" for name, seconds in task.timings.items())
-    operator.report({'INFO'}, f"{frames} frames generated with {task.backend.label} "
+    operator.report({'INFO'}, f"{frames} frames generated on '{task.rig_name}' with {task.backend.label} "
                               f"(frames {task.key_frames[0]}-{task.key_frames[-1]}, {len(task.key_frames)} key poses; "
                               f"{timings})")
     if task.errors:

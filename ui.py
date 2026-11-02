@@ -24,6 +24,8 @@ class RETARGETOR_PT_RetargetPanel(Panel):
         box.prop(scene, "retargetor_target", text="Target")
         target_obj, state = get_character(context)
         if target_obj is None:
+            if scene.retargetor_target is not None:
+                layout.label(text=f"'{scene.retargetor_target.name}' isn't in the scene anymore", icon='ERROR')
             layout.label(text="Choose the armature that receives the animation")
             return
 
@@ -227,6 +229,10 @@ class RETARGETOR_PT_GeneratePanel(Panel):
             layout.label(text="Choose the character in the Retarget panel")
             return
         layout.label(text=f"Character: {rig.name}", icon='ARMATURE_DATA')
+        active = context.active_object
+        if (active is not None and active != rig and active.type == 'ARMATURE'
+                and active != rig.retargetor.model_armature):
+            layout.label(text=f"The active armature is '{active.name}', not the character", icon='ERROR')
         caps = backend.capabilities
         if caps.prompt:
             layout.prop(state, "prompt", text="")

@@ -34,6 +34,11 @@ def is_armature(_self, obj):
     return obj.type == 'ARMATURE'
 
 
+def is_scene_armature(scene, obj):
+    """An armature linked to this scene (the scene's pointer keeps a deleted object alive, out of every scene)"""
+    return obj.type == 'ARMATURE' and scene in obj.users_scene
+
+
 # While True, the update callback of RTGTR_BonePairItem.target_name does nothing (list filled from code)
 _target_update_suspended = False
 
@@ -233,9 +238,10 @@ classes = (
 
 
 def get_character(context):
-    """(target armature object, its RTGTR_CharacterState) for the character edited in the panel, or (None, None)"""
+    """(target armature object, its RTGTR_CharacterState) for the character edited in the panel, or (None, None),
+    also when the target isn't in the scene anymore (deleted: the pointer alone keeps it alive)"""
     target = context.scene.retargetor_target
-    if target is None or target.type != 'ARMATURE':
+    if target is None or not is_scene_armature(context.scene, target):
         return None, None
     return target, target.retargetor
 
@@ -247,7 +253,7 @@ def register():
     bpy.types.Armature.retargetor_profile = PointerProperty(type=RTGTR_RigProfile, override=OVERRIDABLE)
     bpy.types.Object.retargetor = PointerProperty(type=RTGTR_CharacterState, override=OVERRIDABLE)
     bpy.types.Scene.retargetor_target = PointerProperty(
-        type=bpy.types.Object, name="Target Armature", poll=is_armature,
+        type=bpy.types.Object, name="Target Armature", poll=is_scene_armature,
         description="Character edited in the Retarget panel. Its setup is stored on the object itself")
 
 

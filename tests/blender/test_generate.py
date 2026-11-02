@@ -88,6 +88,7 @@ def main():
     bootstrap.register_addon()
     from retargetor import generation
     from retargetor.core.skeleton_io import armature_backend
+    from retargetor.properties import get_character
 
     bootstrap.set_backend("interpolate", developer=True)
     scene = bpy.context.scene
@@ -201,6 +202,13 @@ def main():
     switch["IK_FK"] = 0.0
     switch.keyframe_insert('["IK_FK"]', frame=100)
     checks.check(run_operator() == {'CANCELLED'}, "refused when the switch goes to IK during the range")
+
+    # 4. A deleted character: the scene's pointer keeps the object alive, out of every scene
+    for collection in list(rig.users_collection):
+        collection.objects.unlink(rig)
+    checks.check(scene.retargetor_target == rig, "the deleted rig is still the scene's target")
+    checks.check(get_character(bpy.context) == (None, None), "a target out of the scene isn't the character")
+    checks.check(not bpy.ops.retargetor.generate_inbetweens.poll(), "no generation on a target out of the scene")
     checks.finish()
 
 
