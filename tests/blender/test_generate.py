@@ -156,6 +156,33 @@ def main():
         heads[frame] = rig.matrix_world @ rig.pose.bones["ORG-spine"].head
     checks.below(((heads[1] + heads[61]) / 2 - heads[31]).length * 100, 0.1, "hips halfway at frame 31 (cm)")
 
+    # 1b. Step by step, as the modal operator runs it: the keys are written over many small steps, the progress
+    # goes up to 100%, writing can't be cancelled, and the result is the same
+    first_keys = keys_by_type(rig, generation)
+    task = generation.GenerationTask()
+    task.start(bpy.context, rig)
+    fractions, writing_steps, refused = [], 0, False
+    while not task.update(bpy.context, budget=0.02):
+        fractions.append(task.fraction)
+        if task.stage == generation.WRITING:
+            writing_steps += 1
+            if not refused:
+                refused = not task.cancellable
+                task.cancel()
+                checks.check(task.message.startswith("Writing keys"), f"progress message while writing ({task.message})")
+        time.sleep(0.005)
+    checks.check(not task.cancelled and task.result is not None, "step by step generation finished, cancel refused "
+                                                                  "while writing")
+    checks.check(refused, "writing is not cancellable")
+    checks.check(writing_steps >= 5, f"keys written over several steps ({writing_steps})")
+    checks.check(all(b >= a - 1e-9 for a, b in zip(fractions, fractions[1:])), "progress never goes back")
+    checks.check(max(fractions) > 0.8 and task.fraction == 1.0, f"progress goes up to 100% ({max(fractions):.2f})")
+    stepped_keys = keys_by_type(rig, generation)
+    diffs = [(curve, f, v, stepped_keys.get(curve, {}).get(f)) for curve, frames in first_keys.items()
+             for f, v in frames.items() if stepped_keys.get(curve, {}).get(f) is None
+             or abs(stepped_keys[curve][f][0] - v[0]) > 1e-5 or stepped_keys[curve][f][1] != v[1]]
+    checks.check(not diffs and set(first_keys) == set(stepped_keys), "same keys as the generation in one go")
+
     # 2. A new user key on frame 90, then regenerate: GENERATED keys replaced, frame 90 not written
     scene.frame_set(90)
     head = rig.pose.bones["head"]

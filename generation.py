@@ -246,29 +246,60 @@ def build_request(context, rig, model, backend, rig_profile, key_frames, prompt=
     return request, scale[0], retargeter.errors
 
 
-def apply_motion(context, rig, model, backend, rig_profile, motion, key_frames, translation_scale):
-    """Write the motion on the model's armature, then bake it onto the rig's write controls as GENERATED keys,
-    between the first and last key poses. Frames carrying a user key are never written; the GENERATED keys
-    already in the range are replaced. Returns (frames written, keys removed, retargeting errors)."""
-    scene, view_layer = context.scene, context.view_layer
-    skeleton = armature_skeleton(model)
-    start, end = key_frames[0], key_frames[-1]
-    if motion.start_frame > start or motion.end_frame < end:
-        raise ValueError(f"The backend returned frames {motion.start_frame}-{motion.end_frame}, "
-                         f"{start}-{end} were asked.")
-    write_motion_fcurves(model, motion, root_joint=skeleton.root, action_name=f"{model.name}_motion", world=False)
-    view_layer.update()
+class MotionWriter:
+    """Writes a motion onto the rig in several steps, so Blender stays responsive (about 22 ms per frame on
+    Rigify, all of it in the rig's evaluation). The motion goes on the model's armature first, then is baked onto
+    the rig's write controls as GENERATED keys, from start to end. Frames carrying a user key are never written;
+    the GENERATED keys already in the range are removed when the writer is made.
+    step() until it returns True; then `frames`, `removed` and `errors` hold the result."""
 
-    pairs = core_profile.compose(rig_profile, backend.joint_map, core_profile.FROM_MODEL, backend=backend.id)
-    # The inverse of the rig -> model scale, so a key pose comes back where it was
-    retargeter = Retargeter(model, rig, pairs, 1.0 / translation_scale)
-    controls = [resolved.pair.target for resolved in retargeter.order]
-    removed = remove_generated_keys(rig, controls, start, end)
-    user_frames = set(user_key_frames(rig, controls))
-    frames = [frame for frame in range(start, end + 1) if frame not in user_frames]
-    retargeter.bake(scene, view_layer, frames, keytype=GENERATED)
-    fix_quaternion_signs(rig, controls)
-    return len(frames), removed, retargeter.errors
+    def __init__(self, context, rig, model, backend, rig_profile, motion, start, end, translation_scale):
+        skeleton = armature_skeleton(model)
+        if motion.start_frame > start or motion.end_frame < end:
+            raise ValueError(f"The backend returned frames {motion.start_frame}-{motion.end_frame}, "
+                             f"{start}-{end} were asked.")
+        write_motion_fcurves(model, motion, root_joint=skeleton.root, action_name=f"{model.name}_motion",
+                             world=False)
+        context.view_layer.update()
+
+        pairs = core_profile.compose(rig_profile, backend.joint_map, core_profile.FROM_MODEL, backend=backend.id)
+        # The inverse of the rig -> model scale, so a key pose comes back where it was
+        self.retargeter = Retargeter(model, rig, pairs, 1.0 / translation_scale)
+        self.rig = rig
+        self.controls = [resolved.pair.target for resolved in self.retargeter.order]
+        self.removed = remove_generated_keys(rig, self.controls, start, end)
+        user_frames = set(user_key_frames(rig, self.controls))
+        self.frames = [frame for frame in range(start, end + 1) if frame not in user_frames]
+        self.done = 0
+        self._previous_rotations = {}
+        self._chunk = 2  # frames per step, adjusted to the time budget after each step
+
+    @property
+    def errors(self):
+        return self.retargeter.errors
+
+    @property
+    def fraction(self):
+        return self.done / len(self.frames) if self.frames else 1.0
+
+    @property
+    def finished(self):
+        return self.done >= len(self.frames)
+
+    def step(self, context, budget=0.1):
+        """Write the next frames, about `budget` seconds of work. Returns True once every frame is written."""
+        if not self.finished:
+            chunk = self.frames[self.done:self.done + self._chunk]
+            begin = time.perf_counter()
+            self.retargeter.bake(context.scene, context.view_layer, chunk, keytype=GENERATED,
+                                 previous_rotations=self._previous_rotations)
+            per_frame = (time.perf_counter() - begin) / len(chunk)
+            self._chunk = max(1, min(100, int(budget / max(per_frame, 1e-4))))
+            self.done += len(chunk)
+        if self.finished:
+            fix_quaternion_signs(self.rig, self.controls)
+            return True
+        return False
 
 
 ### The task
@@ -276,7 +307,11 @@ def apply_motion(context, rig, model, backend, rig_profile, motion, key_frames, 
 # Stages of a GenerationTask
 SKELETON = "SKELETON"
 GENERATING = "GENERATING"
+WRITING = "WRITING"
 FINISHED = "FINISHED"
+
+# Share of the progress bar taken by the backend's generation; writing the keys takes the rest
+GENERATION_SHARE = 0.8
 
 
 class GenerationError(Exception):
@@ -298,7 +333,10 @@ class GenerationTask:
         self.translation_scale = 1.0
         self.errors = set()
         self.result = None  # (frames written, keys removed) once finished
+        self.writer = None
         self.cancel_requested = False
+        # The rig was changed before the backend answered (FK snap...): a cancelled generation keeps it
+        self.modified = False
         self.started = time.perf_counter()
         self.timings = {}
 
@@ -306,12 +344,18 @@ class GenerationTask:
     def fraction(self):
         if self.stage == FINISHED:
             return 1.0
-        return self.job.fraction if self.job is not None and self.stage == GENERATING else 0.0
+        if self.stage == WRITING:
+            return GENERATION_SHARE + (1.0 - GENERATION_SHARE) * self.writer.fraction
+        if self.stage == GENERATING and self.job is not None:
+            return GENERATION_SHARE * self.job.fraction
+        return 0.0
 
     @property
     def message(self):
         if self.stage == SKELETON:
             return f"Starting {self.backend.label}"
+        if self.stage == WRITING:
+            return f"Writing keys {self.writer.done}/{len(self.writer.frames)}"
         if self.job is not None and self.job.message:
             return self.job.message
         return "Generating"
@@ -355,8 +399,16 @@ class GenerationTask:
         if self.job.state == process.FAILED:
             raise GenerationError(f"{self.backend.label}: {self.job.error}")
 
-    def update(self, context):
-        """Advance the generation. Returns True when it is finished (or cancelled: see `cancelled`)."""
+    @property
+    def cancellable(self):
+        """Writing the keys can't be cancelled: it would leave the range half written"""
+        return self.stage in (SKELETON, GENERATING)
+
+    def update(self, context, budget=0.1):
+        """Advance the generation. Returns True when it is finished (or cancelled: see `cancelled`).
+        budget: seconds of work at most when writing the keys (a few frames per call)."""
+        if self.stage == WRITING:
+            return self._write(context, budget)
         self.worker.pump()
         if self.job.active:
             return False
@@ -377,19 +429,27 @@ class GenerationTask:
             skeleton = armature_skeleton(model)
             if model is None or skeleton is None:
                 raise GenerationError("The model's armature was deleted during the generation.")
-            start = time.perf_counter()
+            self._write_started = time.perf_counter()
             motion = protocol.motion_from_frames(self.job.frames, skeleton.names)
             self.worker.forget(self.job)
-            frames, removed, errors = apply_motion(context, rig, model, self.backend, self.rig_profile, motion,
-                                                   self.key_frames, self.translation_scale)
-            self.timings["writing"] = time.perf_counter() - start
-            self.errors |= errors
-            self.result = (frames, removed)
-            self.stage = FINISHED
+            self.writer = MotionWriter(context, rig, model, self.backend, self.rig_profile, motion,
+                                       self.key_frames[0], self.key_frames[-1], self.translation_scale)
+            self.stage = WRITING
+            return False
+        return True
+
+    def _write(self, context, budget):
+        self._rig()
+        if not self.writer.step(context, budget):
+            return False
+        self.timings["writing"] = time.perf_counter() - self._write_started
+        self.errors |= self.writer.errors
+        self.result = (len(self.writer.frames), self.writer.removed)
+        self.stage = FINISHED
         return True
 
     def cancel(self):
-        if self.job is not None and self.job.active:
+        if self.cancellable and self.job is not None and self.job.active:
             self.worker.cancel(self.job)
 
     def run(self, context, rig, timeout=None):
@@ -397,7 +457,7 @@ class GenerationTask:
         self.start(context, rig)
         limit = timeout or (self.backend.load_timeout + self.backend.generate_timeout)
         begin = time.perf_counter()
-        while not self.update(context):
+        while not self.update(context, budget=1.0):
             if time.perf_counter() - begin > limit:
                 self.cancel()
                 raise GenerationError(f"{self.backend.label} didn't finish within {limit:.0f} s.")

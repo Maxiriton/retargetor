@@ -9,6 +9,9 @@ from .preferences import active_backend, backend_settings
 from .properties import get_character
 
 GENERATION_ERRORS = (ValueError, KeyError, generation.GenerationError, process.WorkerError)
+# Events still handled by Blender while the keys are written: looking around, nothing that edits
+NAVIGATION_EVENTS = {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE', 'MIDDLEMOUSE', 'WHEELUPMOUSE', 'WHEELDOWNMOUSE',
+                     'TRACKPADPAN', 'TRACKPADZOOM', 'MOUSEROTATE', 'MOUSESMARTZOOM', 'NDOF_MOTION', 'TIMER'}
 
 
 def tag_redraw(context=None):
@@ -34,6 +37,17 @@ def ensure_pump_timer():
 def _character(context):
     rig, _state = get_character(context)
     return rig
+
+
+def _cancelled(operator, task):
+    """A cancelled generation. If the rig was already changed (FK snap...), the operator still finishes, so the
+    changes are one undo step of their own instead of being merged with the next one."""
+    if task.modified:
+        operator.report({'WARNING'}, "Generation cancelled; the changes made to the rig before it are kept "
+                                     "(Ctrl+Z to undo them)")
+        return {'FINISHED'}
+    operator.report({'WARNING'}, "Generation cancelled")
+    return {'CANCELLED'}
 
 
 def _report_result(operator, task):
@@ -68,8 +82,7 @@ class RTGTR_OT_GenerateInbetweens(Operator):
         task = generation.GenerationTask()
         try:
             if not task.run(context, rig):
-                self.report({'WARNING'}, "Generation cancelled")
-                return {'CANCELLED'}
+                return _cancelled(self, task)
         except GENERATION_ERRORS as e:
             self.report({'ERROR'}, str(e.args[0]) if e.args else str(e))
             return {'CANCELLED'}
@@ -92,10 +105,11 @@ class RTGTR_OT_GenerateInbetweens(Operator):
         self._status(context)
         return {'RUNNING_MODAL'}
 
-    def _status(self, context):
+    def _status(self, context, note=""):
         task = self._task
+        note = note or ("Esc to cancel" if task.cancellable else "can't be cancelled")
         context.workspace.status_text_set(
-            f"{task.backend.label}: {task.message} {task.fraction * 100:.0f}%  (Esc to cancel)")
+            f"{task.backend.label}: {task.message} {task.fraction * 100:.0f}%  ({note})")
         tag_redraw(context)
 
     def _finish(self, context):
@@ -106,9 +120,16 @@ class RTGTR_OT_GenerateInbetweens(Operator):
 
     def modal(self, context, event):
         task = self._task
-        if event.type == 'ESC' or getattr(task, "cancel_requested", False):
-            task.cancel()
+        if event.type == 'ESC' or task.cancel_requested:
+            task.cancel_requested = False
+            if task.cancellable:
+                task.cancel()
+            else:
+                self._status(context, "writing the keys can't be cancelled")
         if event.type != 'TIMER':
+            # While the keys are written, nothing may edit the rig or undo (the keys belong to this undo step)
+            if task.stage == generation.WRITING and event.type not in NAVIGATION_EVENTS:
+                return {'RUNNING_MODAL'}
             return {'PASS_THROUGH'}
         try:
             finished = task.update(context)
@@ -121,8 +142,7 @@ class RTGTR_OT_GenerateInbetweens(Operator):
             return {'PASS_THROUGH'}
         self._finish(context)
         if task.cancelled:
-            self.report({'WARNING'}, "Generation cancelled")
-            return {'CANCELLED'}
+            return _cancelled(self, task)
         _report_result(self, task)
         return {'FINISHED'}
 
@@ -134,7 +154,7 @@ class RTGTR_OT_CancelGeneration(Operator):
 
     @classmethod
     def poll(cls, context):
-        return generation.current_task is not None
+        return generation.current_task is not None and generation.current_task.cancellable
 
     def execute(self, context):
         task = generation.current_task

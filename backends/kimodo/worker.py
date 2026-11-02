@@ -76,8 +76,10 @@ class KimodoHandler:
             steps = list(steps)
             for i, step in enumerate(steps):
                 # Raises Cancelled when the add-on cancels: the denoising loop stops there
-                context.progress(0.05 + 0.9 * i / len(steps), "Denoising")
+                context.progress(0.05 + 0.85 * i / len(steps), "Denoising")
                 yield step
+            # Kimodo asks for the next step once the denoising is over: its post-processing comes next
+            context.progress(0.9, "Post-processing")
 
         prompt = request.prompt.strip()
         if prompt and not prompt.endswith("."):

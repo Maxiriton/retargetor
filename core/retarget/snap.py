@@ -311,14 +311,17 @@ class Retargeter:
                 if final_update or sweep < repetitions - 1 or index < len(levels) - 1:
                     view_layer.update()
 
-    def bake(self, scene, view_layer, frames, keytype='KEYFRAME', repetitions=1):
+    def bake(self, scene, view_layer, frames, keytype='KEYFRAME', repetitions=1, previous_rotations=None):
         """Snap and key the mapped target bones on each of the given frames (Blender frame numbers).
         Rotations are keyed in each bone's own rotation mode (quaternions with continuous signs); locations only
-        on the bones flagged "Use Translation". The current frame is restored at the end. Returns the number of frames baked."""
+        on the bones flagged "Use Translation". The current frame is restored at the end. Returns the number of frames baked.
+        previous_rotations: {bone name: Quaternion keyed on the previous frame}, to bake in several calls with
+        continuous quaternion signs (pass the same dict to each call)."""
         frames = sorted(set(int(f) for f in frames))
         keyed = [(r.tgt_pose_bone, r.pair.use_translation, r.rotation_mode == 'QUATERNION') for r in self.order]
         original_frame = scene.frame_current
-        previous_rotations = {}  # {bone name: Quaternion keyed on the previous frame}
+        if previous_rotations is None:
+            previous_rotations = {}
 
         try:
             for frame in frames:
