@@ -12,10 +12,10 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
+from backends.kimodo.joints import JOINT_MAP  # noqa: E402
 from core import motion, profile, roles  # noqa: E402
 from core.retarget.pairs import BonePair, target_map  # noqa: E402
 
-FIXTURES = os.path.join(REPO, "tests", "fixtures")
 PRESETS = os.path.join(REPO, "presets")
 
 
@@ -64,7 +64,7 @@ class TestRoles(unittest.TestCase):
 class TestProfile(unittest.TestCase):
     def setUp(self):
         self.rigify = profile.RigProfile.from_dict(load_json(os.path.join(PRESETS, "rigify_human.json")))
-        self.soma = load_json(os.path.join(FIXTURES, "soma_roles.json"))["joints"]
+        self.soma = dict(JOINT_MAP)
 
     def test_binding_defaults_come_from_the_role(self):
         b = profile.RoleBinding("upper_arm.L", read_bone="x")
@@ -103,6 +103,9 @@ class TestProfile(unittest.TestCase):
         self.assertEqual(len(pairs), 20)
         self.assertEqual(by_target["torso"].source, "Hips")
         self.assertTrue(by_target["torso"].use_translation)
+        # The model's hips match the rig's ORG-spine, not the torso control: the translation pivots on it
+        self.assertEqual(by_target["torso"].pivot, "ORG-spine")
+        self.assertEqual(by_target["hand_fk.L"].pivot, "")
         self.assertEqual(by_target["chest"].source, "Chest")
         self.assertEqual(by_target["hand_fk.L"].correction, (0.0, 0.0, 1.0, 0.0))
         self.assertIsNone(by_target["hand_fk.R"].correction)

@@ -193,12 +193,26 @@ def main(mode, spike_dir, reference_dir):
     checks.check(-0.02 < lowest_toe < 0.1, f"feet on the floor (lowest toe tip {lowest_toe * 100:.1f} cm)")
 
     reference = bootstrap.load_json(os.path.join(reference_dir, "rig_result.json"))
+    # The hips: the rig's ORG-spine (read bone) follows the generated Hips' movement, scaled. The spike moved
+    # the torso control by that movement instead, ignoring the torso's offset to ORG-spine (1.9 cm), which
+    # turns with the hips: its hips were up to 1 cm off.
+    k = scale[0]
+    hips_rest = generated.matrix_world @ generated.pose.bones[joints["hips"]].bone.head_local
+    org_rest = rig.matrix_world @ rig.pose.bones["ORG-spine"].bone.head_local
+    worst_hips = 0.0
+    for frame in clip:
+        scene.frame_set(frame)
+        expected = org_rest + k * (generated.matrix_world @ generated.pose.bones[joints["hips"]].head - hips_rest)
+        worst_hips = max(worst_hips, ((rig.matrix_world @ rig.pose.bones["ORG-spine"].head) - expected).length * 100)
+    print(f"FINDING rig hips (ORG-spine) vs the generated hips' movement, worst {worst_hips:.3f} cm")
+    checks.below(worst_hips, 0.1, "rig hips follow the generated hips' movement, worst (cm)")
+
     # The spike snapped with 5 fixed passes, too few for the hands (6 levels of dependencies): they were up to
     # 1.9 degrees off the generated motion. Snapping by dependency level is exact (checked just above).
     hands = {"ORG-hand.L", "ORG-hand.R"}
     rot, loc = compare_matrices(rig, reference, clip, names=set(org_bones) - hands)
     checks.below(rot, 0.001, "rig vs the spike's result over the clip, worst rotation of the ORG bones but the hands (deg)")
-    checks.below(loc, 0.001, "rig vs the spike's result over the clip, worst position of the ORG bones (cm)")
+    checks.below(loc, 1.5, "rig vs the spike's result over the clip, worst position of the ORG bones (cm, the spike's hips)")
     rot, _loc = compare_matrices(rig, reference, clip, names=hands)
     checks.below(rot, 2.0, "rig vs the spike's result, hands (deg, the spike's were not converged)")
 

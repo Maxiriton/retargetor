@@ -66,9 +66,9 @@ def load_json(path):
 
 
 def soma_fixture():
-    """(role -> SOMA joint map, root joint) used by the tests (Phase 3 moves it into backends/kimodo/)"""
-    data = load_json(os.path.join(FIXTURES, "soma_roles.json"))
-    return data["joints"], data["root_joint"]
+    """(role -> SOMA joint map, root joint) of the Kimodo backend"""
+    from retargetor.backends.kimodo.joints import JOINT_MAP, ROOT_JOINT
+    return dict(JOINT_MAP), ROOT_JOINT
 
 
 def rigify_profile():

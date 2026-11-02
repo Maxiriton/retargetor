@@ -151,7 +151,7 @@ def compose(profile, joint_map, direction, backend=None):
     """Bone pairs for one direction, from a rig profile and a backend's {role id: joint name} map.
 
     TO_MODEL: rig read bone -> model joint. FROM_MODEL: model joint -> rig write bone, with the
-    corrections recorded for `backend`. Roles without a bone on the rig side, or unknown to the backend,
+    corrections recorded for `backend`, and the read bone as pivot of the translated roles. Roles without a bone on the rig side, or unknown to the backend,
     are skipped. Offset mode and Use Translation come from the profile in both directions.
     """
     if direction not in (TO_MODEL, FROM_MODEL):
@@ -167,6 +167,8 @@ def compose(profile, joint_map, direction, backend=None):
                 pairs.append(BonePair(binding.read_bone, joint, binding.offset_mode, binding.use_translation))
         elif binding.write_bone:
             correction = binding.corrections.get(backend) if backend else None
+            # The joint's head matches the read bone's head on the rig, not necessarily the control's
+            pivot = binding.read_bone if binding.use_translation and binding.read_bone != binding.write_bone else ""
             pairs.append(BonePair(joint, binding.write_bone, binding.offset_mode, binding.use_translation,
-                                  correction))
+                                  correction, pivot))
     return pairs

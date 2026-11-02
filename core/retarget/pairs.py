@@ -16,12 +16,17 @@ class BonePair:
         (right for limbs). REST_OFFSET applies the full rotation difference between the two rest poses.
     use_translation: the target also copies the source's movement (root motion), scaled.
     correction: extra rotation (w, x, y, z) applied in the target bone's local space, or None.
+    pivot: for a translated pair, the target-side bone whose head matches the source bone's head, when it
+        isn't the target itself (a rig's hips are read from one bone and written to another control: Rigify's
+        ORG-spine and torso). The source's movement is applied to the pivot, and the target keeps its offset
+        to the pivot, turned with the source. Empty: the target's own head.
     """
     source: str
     target: str
     offset_mode: str = "ROLL"
     use_translation: bool = False
     correction: tuple[float, float, float, float] | None = None
+    pivot: str = ""
 
     def __post_init__(self):
         if self.offset_mode not in OFFSET_MODES:

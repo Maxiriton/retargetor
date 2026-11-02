@@ -114,7 +114,8 @@ def _same_matrix(a, b, tolerance=1e-6):
 
 class _ResolvedPair:
     """A BonePair with its pose bones and rest offsets looked up once."""
-    __slots__ = ("pair", "src_pose_bone", "tgt_pose_bone", "roll", "rest_offset", "correction", "rotation_mode")
+    __slots__ = ("pair", "src_pose_bone", "tgt_pose_bone", "roll", "rest_offset", "correction", "rotation_mode",
+                 "pivot_bone")
 
     def __init__(self, source_obj, target_obj, pair):
         self.pair = pair
@@ -128,6 +129,11 @@ class _ResolvedPair:
         self.correction = Quaternion(pair.correction) if pair.correction is not None else None
         # The target keeps its rotation mode (Rigify's shoulders are in Euler, for example)
         self.rotation_mode = self.tgt_pose_bone.rotation_mode
+        self.pivot_bone = None
+        if pair.pivot:
+            self.pivot_bone = target_obj.data.bones.get(pair.pivot)
+            if self.pivot_bone is None:
+                raise KeyError(f"The pivot bone '{pair.pivot}' does not exist in the armature '{target_obj.name}'.")
 
 
 class Retargeter:
@@ -182,14 +188,27 @@ class Retargeter:
         The source's movement away from its rest position is scaled by the translation scale
         and added to the target's own rest position:
             target = target rest + k * (source now - source rest)
+        With a pivot (BonePair.pivot), the movement goes to the pivot, and the target keeps its rest offset to
+        the pivot, turned like the source bone:
+            target = pivot rest + k * (source now - source rest) + R * (target rest - pivot rest)
         Everything is computed in world space, so object transforms and scales are taken into account.
         """
         source_obj, target_obj = self.source_obj, self.target_obj
-        src_rest_world = source_obj.matrix_world @ resolved.src_pose_bone.bone.head_local
-        src_now_world = source_obj.matrix_world @ resolved.src_pose_bone.head
+        src_bone = resolved.src_pose_bone
+        src_rest_world = source_obj.matrix_world @ src_bone.bone.head_local
+        src_now_world = source_obj.matrix_world @ src_bone.head
         tgt_rest_world = target_obj.matrix_world @ resolved.tgt_pose_bone.bone.head_local
+        movement = self.translation_scale * (src_now_world - src_rest_world)
 
-        tgt_world = tgt_rest_world + self.translation_scale * (src_now_world - src_rest_world)
+        if resolved.pivot_bone is None:
+            tgt_world = tgt_rest_world + movement
+        else:
+            pivot_rest_world = target_obj.matrix_world @ resolved.pivot_bone.head_local
+            # The source bone's rotation from rest, in world space
+            now = (source_obj.matrix_world @ src_bone.matrix).to_3x3().normalized()
+            rest = (source_obj.matrix_world @ src_bone.bone.matrix_local).to_3x3().normalized()
+            turn = now @ rest.transposed()
+            tgt_world = pivot_rest_world + movement + turn @ (tgt_rest_world - pivot_rest_world)
         return target_obj.matrix_world.inverted() @ tgt_world
 
     def _snap(self, resolved, add_roll=True, add_correction=True):
