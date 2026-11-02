@@ -55,6 +55,20 @@ def suspended_target_update():
         _target_update_suspended = previous
 
 
+# Stored as integers in the files: never change the numbers
+range_items = [
+    ('KEY_POSES', "Key Poses", "From the first key pose to the last one", 0),
+    ('CUSTOM', "Custom", "From a start frame, for a given duration: with fewer key poses (or none: the prompt "
+                         "alone), or to extend an animation. Key poses outside the range are ignored", 1),
+]
+
+
+def update_range_mode(self, context):
+    """A custom range starts on the current frame"""
+    if self.range_mode == 'CUSTOM' and context is not None and context.scene is not None:
+        self.range_start = context.scene.frame_current
+
+
 def update_target_bone(self, _context):
     """A different target bone makes any recorded correction meaningless"""
     if _target_update_suspended:
@@ -109,9 +123,20 @@ class RTGTR_CharacterState(PropertyGroup):
                            override=OVERRIDABLE)
     seed: IntProperty(name="Seed", default=0, min=0,
                       description="Same seed, same key poses and same prompt: same motion", override=OVERRIDABLE)
+    range_mode: EnumProperty(items=range_items, name="Range", default='KEY_POSES', update=update_range_mode,
+                             description="Frames to generate", override=OVERRIDABLE)
+    range_start: IntProperty(name="Start", default=1, description="First frame of the custom range",
+                             override=OVERRIDABLE)
+    range_duration: IntProperty(name="Duration", default=120, min=2,
+                                description="Number of frames of the custom range", override=OVERRIDABLE)
     model_armature: PointerProperty(type=bpy.types.Object, name="Model Armature", poll=is_armature,
                                     description="The motion model's skeleton, built by the add-on for this character",
                                     override=OVERRIDABLE)
+
+    @property
+    def range_end(self):
+        """Last frame of the custom range"""
+        return self.range_start + self.range_duration - 1
 
     def pairs(self):
         """The bone list as BonePairs (rows without a target bone are left out)"""

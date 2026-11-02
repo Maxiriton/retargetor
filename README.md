@@ -134,7 +134,15 @@ Set the profile up in the rig's own file. In a shot file that links the rig, the
 3. **Limbs in IK**: generation writes the FK controls, so it refuses to run while a limb of the profile is in IK on the range. Use **Snap FK to IK** (Rig Profile panel) on your key frames first.
 4. In the **Generate** panel, write a **prompt** (what the character does) and choose a **seed**, then click **Generate In-betweens**. The panel and the status bar show the progress: the model's own steps, then the keys being written onto the rig. **Esc** (or the cancel button) stops the generation until the keys are being written; writing takes a few seconds and can't be stopped (Blender stays responsive meanwhile, you can look around but not edit).
 
-The model generates the motion from your first key pose to your last one. The result is written on the rig's controls as **Generated** keys, on every frame between the key poses. Frames carrying one of your keys are never written. Generating again replaces the Generated keys of the range and keeps yours. The whole generation is one undo step.
+The model generates the motion from your first key pose to your last one. The result is written on the rig's controls as **Generated** keys, on every frame between the key poses.
+
+**Range**: **Key Poses** (the default) goes from the first key pose to the last one. **Custom** sets a start frame (the current frame when you switch to Custom, or the clock button) and a duration: the panel shows the frames, the seconds and the key poses inside. Key poses outside the range are ignored (and never touched). With a custom range you can:
+
+- generate from the **prompt alone**, with no key pose: the motion starts where the character stands on the start frame, facing where it faces (on Rigify, move or turn the **root** control: it isn't a control of the profile, so it doesn't make a key pose);
+- start from **one key pose**, or end on one: the motion starts where the character stands on the start frame, so to walk up to a key pose, place the root where the walk starts;
+- **extend** an animation past its last key pose.
+
+Kimodo needs no key pose and generates up to 10 s; the panel says when the range is too long, or has fewer key poses than the backend needs (the interpolation test backend needs two). Frames carrying one of your keys are never written. Generating again replaces the Generated keys of the range and keeps yours. The whole generation is one undo step.
 
 - The first generation starts the model (about 20 s with Kimodo); the model then stays loaded, and the next ones take about 3 s plus the time to write the keys (about 3 s for 120 frames). **Start** / **Stop** in the panel load the model ahead of time, or free its memory.
 - The model's skeleton is added to the scene as a hidden armature, in a **Retargetor Models** collection, next to your character.

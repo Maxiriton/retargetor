@@ -83,6 +83,15 @@ def quaternion_flips(rig, generation, bones):
     return flips
 
 
+def draw_generate_panel():
+    """Errors found drawing the Generate panel (see test_panel.CheckingLayout)"""
+    from test_panel import CheckingLayout
+    from retargetor import ui
+    errors = []
+    ui.RETARGETOR_PT_GeneratePanel.draw(type("Panel", (), {"layout": CheckingLayout(errors)})(), bpy.context)
+    return errors
+
+
 def main():
     checks = bootstrap.Checks("test_generate")
     bootstrap.register_addon()
@@ -103,6 +112,7 @@ def main():
     limbs = [b.read_bone for b in rig_profile.roles if b.offset_mode == 'ROLL']
 
     checks.check(generation.find_key_frames(rig, rig_profile) == KEY_FRAMES, "key poses found on frames 1, 61, 120")
+    checks.check(draw_generate_panel() == [], "Generate panel draws")
     before_poses = snapshot(rig, org_bones, KEY_FRAMES)
     before_keys = keys_by_type(rig, generation)
 
@@ -214,12 +224,45 @@ def main():
     scene.frame_set(90)
     checks.close(head.rotation_quaternion.w, 0.9, 1e-6, "the new user key keeps its value")
 
+    # 2b. Custom range past the last key pose: extends the animation (the interpolation holds the last pose)
+    state = rig.retargetor
+    scene.frame_set(1)
+    state.range_mode = 'CUSTOM'
+    checks.check(state.range_start == 1, "a custom range starts on the current frame")
+    state.range_duration = 150
+    keys_before = keys_by_type(rig, generation)
+    task = generation.GenerationTask()
+    checks.check(task.run(bpy.context, rig), "generation on a custom range, past the last key pose")
+    checks.check((task.start_frame, task.end_frame, task.key_frames) == (1, 150, [1, 61, 90, 120]),
+                 f"range 1-150 with its key poses ({task.start_frame}-{task.end_frame}, {task.key_frames})")
+    after_keys = keys_by_type(rig, generation)
+    checks.check(user_keys(after_keys) == user_keys(keys_before), "user keys untouched by the custom range")
+    frames = after_keys[('pose.bones["upper_arm_fk.L"].rotation_quaternion', 0)]
+    generated = {f for f, (_v, t) in frames.items() if t == 'GENERATED'}
+    checks.check(generated == set(range(1, 151)) - {1, 61, 90, 120}, "GENERATED keys up to frame 150")
+    held = snapshot(rig, END_BONES, [120])[120]
+    angle, dist = worst_change(rig, {150: held})
+    checks.below(angle, 1e-3, "frame 150 holds the last key pose (deg)")
+
+    # A range holding one key pose: the interpolation backend needs two, the panel says so
+    state.range_start, state.range_duration = 100, 51
+    checks.check(generation.generation_range(rig, rig_profile) == (100, 150, [120]), "key poses outside the range "
+                                                                                       "are ignored")
+    checks.check(run_operator() == {'CANCELLED'}, "one key pose refused by the interpolation backend")
+    from retargetor.backends.registry import get
+    problem = get("interpolate").range_problem(100, 150, 30.0, 1)
+    checks.check("at least 2 key poses" in problem, f"the message says why ({problem})")
+    checks.check(draw_generate_panel() == [], "Generate panel draws a custom range")
+    checks.check(get("kimodo").range_problem(100, 150, 30.0, 0) == "", "Kimodo takes a range without key pose")
+    checks.check("at most 10 s" in get("kimodo").range_problem(1, 301, 30.0, 0), "Kimodo: 10 s at most")
+    state.range_mode = 'KEY_POSES'
+
     # 3. A limb in IK is refused
     switch = rig.pose.bones["upper_arm_parent.L"]
     switch["IK_FK"] = 0.0
     checks.check(run_operator() == {'CANCELLED'}, "refused with an arm in IK")
     try:
-        generation.find_key_frames(rig, rig_profile)
+        generation.check_limbs_fk(rig, rig_profile, 1, 120)
         message = ""
     except ValueError as e:
         message = str(e)

@@ -239,13 +239,49 @@ class RETARGETOR_PT_GeneratePanel(Panel):
         if caps.seed:
             layout.prop(state, "seed")
 
+        problem = draw_range(context, layout, rig, state, backend)
+
         task = generation.current_task
         if task is not None:
             row = layout.row(align=True)
             row.progress(factor=task.fraction, type='BAR', text=f"{task.message} {task.fraction * 100:.0f}%")
             row.operator("retargetor.cancel_generation", text="", icon='CANCEL')
         else:
-            layout.operator("retargetor.generate_inbetweens", icon='ANIM')
+            row = layout.row()
+            row.enabled = not problem
+            row.operator("retargetor.generate_inbetweens", icon='ANIM')
+
+
+def _error(layout, text, width=48):
+    """An error message as labels, cut into lines"""
+    import textwrap
+    for i, line in enumerate(textwrap.wrap(text, width) if text else []):
+        layout.label(text=line, icon='ERROR' if i == 0 else 'BLANK1')
+
+
+def draw_range(context, layout, rig, state, backend):
+    """The frames the next generation covers, and why the backend can't generate them ("" if it can)"""
+    box = layout.box()
+    box.row().prop(state, "range_mode", expand=True)
+    if state.range_mode == 'CUSTOM':
+        row = box.row(align=True)
+        row.prop(state, "range_start")
+        row.operator("retargetor.range_start_here", text="", icon='TIME')
+        row.prop(state, "range_duration")
+    scene = context.scene
+    fps = scene.render.fps / scene.render.fps_base
+    try:
+        start, end, key_frames = generation.generation_range(rig, rig.data.retargetor_profile.to_core())
+    except ValueError as e:
+        _error(box, str(e))
+        return str(e)
+    keys = ", ".join(str(f) for f in key_frames[:6]) + (" ..." if len(key_frames) > 6 else "")
+    box.label(text=f"Frames {start}-{end} ({(end - start + 1) / fps:.1f} s)", icon='TIME')
+    box.label(text=f"{len(key_frames)} key poses" + (f": {keys}" if key_frames else " (prompt only)"),
+              icon='KEYFRAME')
+    problem = backend.range_problem(start, end, fps, len(key_frames))
+    _error(box, problem)
+    return problem
 
 
 class RTGTR_UL_Roles(UIList):

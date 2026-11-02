@@ -126,7 +126,7 @@ class TestMotion(unittest.TestCase):
     def test_round_trip(self):
         pose = motion.Pose({"a": (1.0, 0.0, 0.0, 0.0)}, (0.0, 1.0, 0.9))
         request = motion.GenerationRequest(1, 120, 30.0, {1: pose, 61: motion.Pose({"a": (0.0, 1.0, 0.0, 0.0)})},
-                                           prompt="walk", seed=1)
+                                           prompt="walk", seed=1, origin=pose)
         again = motion.GenerationRequest.from_dict(json.loads(json.dumps(request.to_dict())))
         self.assertEqual(again, request)
         self.assertAlmostEqual(request.duration, 4.0)
@@ -136,6 +136,20 @@ class TestMotion(unittest.TestCase):
         self.assertEqual((clip.end_frame, list(clip.frames)), (11, [10, 11]))
         with self.assertRaises(KeyError):
             clip.pose_at(12)
+
+    def test_backend_range(self):
+        from backends.base import Backend, Capabilities
+
+        class Prompted(Backend):
+            label = "Prompted"
+            capabilities = Capabilities(max_duration=10.0, min_key_poses=0)
+
+        backend = Prompted()
+        self.assertEqual(backend.range_problem(1, 300, 30.0, 0), "")
+        self.assertIn("at most 10 s", backend.range_problem(1, 301, 30.0, 3))
+        self.assertIn("at least 2 key poses", Backend().range_problem(1, 30, 30.0, 1))
+        with self.assertRaisesRegex(ValueError, "at most"):
+            backend.check_request(motion.GenerationRequest(1, 400, 30.0))
 
     def test_request_checks(self):
         with self.assertRaisesRegex(ValueError, "outside the range"):

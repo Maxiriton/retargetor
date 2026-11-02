@@ -1,7 +1,7 @@
 """Generate In-betweens with Kimodo (needs the Kimodo venv and a CUDA GPU), on the Phase 1 Rigify rig.
 
     blender -b --factory-startup <rig_keyposes.blend> --python tests/blender/test_generate_kimodo.py --
-        <base|heading|fps24> <kimodo python> <out dir> [<spike rig_result.json dump>]
+        <base|heading|fps24|range> <kimodo python> <out dir> [<spike rig_result.json dump>]
 
 base:    key poses on frames 1, 61, 120 at 30 fps, prompt and seed of the Phase 1 spike. Writes the rig's motion
          to <out dir>/base.json. Compared with the spike's result if its dump is given (tests/run_tests.py
@@ -10,6 +10,8 @@ heading: the whole character turned 90 degrees around Z (its torso control, on e
          must be the base result turned 90 degrees.
 fps24:   the scene at 24 fps, key poses moved to the same times (frames 1, 49, 96): the result must follow
          the base result at the same times.
+range:   custom ranges: the prompt alone (no key pose, the character turned 90 degrees), starting from one key
+         pose, ending on one key pose.
 """
 import json
 import math
@@ -240,6 +242,92 @@ def run_fps24(checks, kimodo_python, out_dir):
     checks.below(mean_d, 1.0, "24 fps result follows the 30 fps one at the same times, mean head (cm)")
 
 
+def hips_heading(rig):
+    """Where the character faces (radians around Z, 0 = -Y, Blender's front), from its thighs"""
+    left = rig.matrix_world @ rig.pose.bones["ORG-thigh.L"].head
+    right = rig.matrix_world @ rig.pose.bones["ORG-thigh.R"].head
+    side = left - right  # points to the character's left (+X when facing -Y)
+    return math.atan2(side.y, side.x)
+
+
+def angle_between(a, b):
+    return abs((a - b + math.pi) % (2 * math.pi) - math.pi)
+
+
+def generated_frames(rig, bone="upper_arm_fk.L"):
+    from retargetor import generation
+    bag = generation.channelbag(rig)
+    fcurve = bag.fcurves.find(f'pose.bones["{bone}"].rotation_quaternion', index=0)
+    return {round(p.co.x) for p in fcurve.keyframe_points if p.type == 'GENERATED'}
+
+
+def jump_cm(rig, frame_a, frame_b, bone="ORG-spine"):
+    scene = bpy.context.scene
+    scene.frame_set(frame_a)
+    a = rig.matrix_world @ rig.pose.bones[bone].head
+    scene.frame_set(frame_b)
+    return ((rig.matrix_world @ rig.pose.bones[bone].head) - a).length * 100
+
+
+def run_range(checks, kimodo_python):
+    rig = setup(kimodo_python)
+    scene = bpy.context.scene
+    state = rig.retargetor
+
+    # The prompt alone, frames 200-289, past every key pose; the whole character turned 90 degrees (Rigify's
+    # root: not a control of the profile, so it doesn't make a key pose)
+    root = rig.pose.bones["root"]
+    root.rotation_mode = 'QUATERNION'
+    root.rotation_quaternion = Matrix.Rotation(math.radians(90.0), 4, 'Z').to_quaternion()
+    root.keyframe_insert("rotation_quaternion", frame=200)
+    scene.frame_set(200)
+    start_hips = (rig.matrix_world @ rig.pose.bones["ORG-spine"].head).copy()
+    start_heading = hips_heading(rig)
+    state.range_mode = 'CUSTOM'
+    state.range_start, state.range_duration = 200, 90
+    rig.retargetor.prompt = "A person walks forward"
+    task = generate(checks, "prompt only, first generation (starts Kimodo)")
+    checks.check(task.key_frames == [] and (task.start_frame, task.end_frame) == (200, 289),
+                 f"no key pose, frames 200-289 ({task.key_frames})")
+    checks.check(generated_frames(rig) == set(range(200, 290)), "GENERATED keys on every frame of the range")
+    check_follows_model(checks, rig, range(200, 290), "prompt only")
+    scene.frame_set(200)
+    hips = rig.matrix_world @ rig.pose.bones["ORG-spine"].head
+    moved = ((hips - start_hips) * Vector((1.0, 1.0, 0.0))).length * 100
+    turn = math.degrees(angle_between(hips_heading(rig), start_heading))
+    print(f"FINDING prompt only: the motion starts {moved:.1f} cm from the character, turned {turn:.1f} deg")
+    checks.below(moved, 15.0, "prompt only: starts where the character stands (cm, horizontal)")
+    checks.below(turn, 20.0, "prompt only: starts facing where the character faces (deg)")
+    scene.frame_set(289)
+    walked = ((rig.matrix_world @ rig.pose.bones["ORG-spine"].head) - hips).length
+    # The character's left side is (cos h, sin h): its front is left x up
+    left = Vector((math.cos(start_heading), math.sin(start_heading), 0.0))
+    forward = left.cross(Vector((0.0, 0.0, 1.0)))
+    along = ((rig.matrix_world @ rig.pose.bones["ORG-spine"].head) - hips).dot(forward)
+    print(f"FINDING prompt only: walked {walked:.2f} m, {along:.2f} m forward")
+    checks.check(along > 0.5, f"prompt only: walks forward, where the character faces ({along:.2f} m)")
+
+    # One key pose, at the start: frames 120-239 start from the key pose on frame 120
+    state.range_start, state.range_duration = 120, 120
+    before = motion_snapshot(rig, [120])
+    task = generate(checks, "starting from one key pose")
+    checks.check(task.key_frames == [120], f"one key pose ({task.key_frames})")
+    key_poses_kept(checks, rig, before, "one key pose at the start")
+    checks.check(generated_frames(rig) >= set(range(121, 240)), "GENERATED keys after the key pose")
+    check_follows_model(checks, rig, range(120, 240), "one key pose at the start")
+    checks.below(jump_cm(rig, 120, 121), 5.0, "one key pose at the start: no jump after it (cm)")
+
+    # One key pose, at the end: frames 70-120 end on the key pose on frame 120
+    state.range_start, state.range_duration = 70, 51
+    state.prompt = "A person takes a few steps"
+    before = motion_snapshot(rig, [120])
+    task = generate(checks, "ending on one key pose")
+    checks.check(task.key_frames == [120], f"one key pose ({task.key_frames})")
+    key_poses_kept(checks, rig, before, "one key pose at the end")
+    checks.check(generated_frames(rig) >= set(range(70, 120)), "GENERATED keys before the key pose")
+    checks.below(jump_cm(rig, 119, 120), 5.0, "one key pose at the end: no jump before it (cm)")
+
+
 def main():
     args = bootstrap.script_args()
     mode, kimodo_python, out_dir = args[0], args[1], args[2]
@@ -252,6 +340,8 @@ def main():
             run_heading(checks, kimodo_python, out_dir)
         elif mode == "fps24":
             run_fps24(checks, kimodo_python, out_dir)
+        elif mode == "range":
+            run_range(checks, kimodo_python)
     finally:
         from retargetor.backends import registry
         registry.stop_all()

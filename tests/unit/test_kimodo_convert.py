@@ -74,6 +74,18 @@ class TestFrameRates(unittest.TestCase):
         self.assertAlmostEqual(times[1], 1.25)
         self.assertTrue(np.all(np.diff(times) > 0))
 
+    def test_timing_of_a_custom_range(self):
+        # Key poses inside a longer range: counted from the range's start, the range's ends anchor the time map
+        timing = convert.model_timing(1, 150, [31, 91], 30.0, 30.0)
+        self.assertEqual((timing.key_indices, timing.count), ([30, 90], 150))
+        self.assertEqual((timing.anchors, timing.anchor_indices), ([1, 31, 91, 150], [0, 30, 90, 149]))
+        # No key pose: the range alone (24 fps, 4 s -> 120 model frames)
+        timing = convert.model_timing(10, 105, [], 24.0, 30.0)
+        self.assertEqual((timing.key_indices, timing.count, timing.anchors), ([], 120, [10, 105]))
+        # A key pose on the last frame keeps its own model frame
+        timing = convert.model_timing(1, 96, [1, 96], 24.0, 30.0)
+        self.assertEqual((timing.key_indices, timing.count, timing.anchor_indices), ([0, 119], 120, [0, 119]))
+
     def test_resample(self):
         rotations = np.stack([np.tile(turn_z(0.1 * i), (2, 1)) for i in range(5)])
         positions = np.arange(15, dtype=float).reshape(5, 3)
@@ -106,10 +118,10 @@ class TestCanonical(unittest.TestCase):
         """Heading canonicalization: the same key poses turned 90 degrees and moved elsewhere give the same
         model inputs, so the model generates the same motion (turned back afterwards)."""
         layout = small_layout()
-        reference, _c, indices, count = convert.request_to_constraints(make_request(), layout, 30.0)
-        turned, canonical, _i, _n = convert.request_to_constraints(
+        reference, _c, timing = convert.request_to_constraints(make_request(), layout, 30.0)
+        turned, canonical, _t = convert.request_to_constraints(
             make_request(turn=math.pi / 2, offset=(4.0, 1.0)), layout, 30.0)
-        self.assertEqual((indices, count), ([0, 30, 60], 61))
+        self.assertEqual((timing.key_indices, timing.count), ([0, 30, 60], 61))
         a, b = reference[0], turned[0]
         np.testing.assert_allclose(b["root_positions"], a["root_positions"], atol=1e-9)
         qa = quat.from_axis_angle(np.array(a["local_joints_rot"]))
@@ -121,7 +133,8 @@ class TestCanonical(unittest.TestCase):
         """A model output in the canonical frame goes back to the character's place and heading"""
         layout = small_layout()
         request = make_request(turn=math.pi / 2, offset=(4.0, 1.0))
-        _cons, canonical, indices, count = convert.request_to_constraints(request, layout, 30.0)
+        _cons, canonical, timing = convert.request_to_constraints(request, layout, 30.0)
+        indices, count = timing.key_indices, timing.count
         frames, rotations, roots = convert.key_poses_to_kimodo(request, layout)
         rot_c, pos_c = canonical.apply(rotations, roots)
         # A fake model output holding the canonical key poses on their frames
@@ -130,13 +143,33 @@ class TestCanonical(unittest.TestCase):
         for k, index in enumerate(indices):
             out_rot[index] = quat.to_matrix(rot_c[k])
             out_pos[index] = pos_c[k]
-        rot_b, pos_b = convert.output_to_blender(out_rot, out_pos, canonical, request, indices)
+        rot_b, pos_b = convert.output_to_blender(out_rot, out_pos, canonical, request, timing)
         self.assertEqual(len(rot_b), 61)
         for frame in frames:
             pose = request.key_poses[frame]
             np.testing.assert_allclose(pos_b[frame - 1], pose.root_position, atol=1e-9)
             expected = np.array([pose.rotations[n] for n in layout.names77])
             self.assertLess(np.max(1.0 - np.abs(np.sum(rot_b[frame - 1] * expected, -1))), 1e-12)
+
+
+    def test_origin_places_the_motion(self):
+        """Without key pose, the canonical frame comes from the origin: the character's place and heading"""
+        layout = small_layout()
+        posed = make_request(turn=1.0, offset=(2.0, 3.0))
+        origin = posed.key_poses[1]
+        request = GenerationRequest(1, 90, 30.0, {}, prompt="walk", origin=origin)
+        constraints, canonical, timing = convert.request_to_constraints(request, layout, 30.0)
+        self.assertEqual((constraints, timing.count), ([], 90))
+        _cons, from_key, _t = convert.request_to_constraints(posed, layout, 30.0)
+        np.testing.assert_allclose(canonical.origin, from_key.origin, atol=1e-12)
+        self.assertAlmostEqual(canonical.heading, from_key.heading)
+        # A motion standing at the canonical origin, facing +Z, comes back where the character stands
+        count = timing.count
+        rot_b, pos_b = convert.output_to_blender(np.tile(np.eye(3), (count, 5, 1, 1)),
+                                                 np.tile((0.0, 0.95, 0.0), (count, 1)), canonical, request, timing)
+        np.testing.assert_allclose(pos_b[0, :2], origin.root_position[:2], atol=1e-9)
+        with self.assertRaisesRegex(ValueError, "origin"):
+            convert.request_to_constraints(GenerationRequest(1, 90, 30.0), layout, 30.0)
 
 
 if __name__ == "__main__":

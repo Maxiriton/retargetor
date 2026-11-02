@@ -54,16 +54,16 @@ def _report_result(operator, task):
     frames, removed = task.result
     timings = ", ".join(f"{name} {seconds:.1f} s" for name, seconds in task.timings.items())
     operator.report({'INFO'}, f"{frames} frames generated on '{task.rig_name}' with {task.backend.label} "
-                              f"(frames {task.key_frames[0]}-{task.key_frames[-1]}, {len(task.key_frames)} key poses; "
+                              f"(frames {task.start_frame}-{task.end_frame}, {len(task.key_frames)} key poses; "
                               f"{timings})")
     if task.errors:
         operator.report({'WARNING'}, "Some bones were skipped: " + "; ".join(sorted(task.errors)))
 
 
 class RTGTR_OT_GenerateInbetweens(Operator):
-    """Generate the motion between the key poses of the character with the active backend.
-    Key poses are the frames where a control of the rig profile has a key that isn't Generated; the result is
-    written as Generated keys, never on a key pose. Esc cancels"""
+    """Generate the character's motion with the active backend, from the first key pose to the last one, or on
+    its custom range. Key poses are the frames where a control of the rig profile has a key that isn't
+    Generated; the result is written as Generated keys, never on a key pose. Esc cancels"""
     bl_idname = "retargetor.generate_inbetweens"
     bl_label = "Generate In-betweens"
     bl_options = {'REGISTER', 'UNDO'}
@@ -147,6 +147,22 @@ class RTGTR_OT_GenerateInbetweens(Operator):
         return {'FINISHED'}
 
 
+class RTGTR_OT_RangeStartHere(Operator):
+    """Start the character's custom range on the current frame"""
+    bl_idname = "retargetor.range_start_here"
+    bl_label = "Start Here"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        rig = _character(context)
+        return rig is not None and rig.is_editable
+
+    def execute(self, context):
+        _character(context).retargetor.range_start = context.scene.frame_current
+        return {'FINISHED'}
+
+
 class RTGTR_OT_CancelGeneration(Operator):
     """Cancel the running generation"""
     bl_idname = "retargetor.cancel_generation"
@@ -198,6 +214,7 @@ class RTGTR_OT_BackendStop(Operator):
 
 classes = (
     RTGTR_OT_GenerateInbetweens,
+    RTGTR_OT_RangeStartHere,
     RTGTR_OT_CancelGeneration,
     RTGTR_OT_BackendStart,
     RTGTR_OT_BackendStop,

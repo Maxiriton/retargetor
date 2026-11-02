@@ -9,6 +9,7 @@ import re
 import time
 
 import bpy
+import numpy as np
 from mathutils import Matrix
 
 from .backends import process, protocol, registry
@@ -21,6 +22,8 @@ from .core.skeleton_io import armature_backend, armature_skeleton, build_armatur
 from .preferences import active_backend, backend_settings
 
 GENERATED = 'GENERATED'
+# Value of the GENERATED item of Keyframe.type, for foreach_get
+_GENERATED_VALUE = bpy.types.Keyframe.bl_rna.properties["type"].enum_items[GENERATED].value
 MODELS_COLLECTION = "Retargetor Models"
 _BONE_PATH = re.compile(r'^pose\.bones\["((?:[^"\\]|\\.)*)"\]')
 
@@ -58,9 +61,15 @@ def user_key_frames(rig, bones=None):
     """Sorted frames where the given bones (any F-curve if None) have a user key: any type but GENERATED"""
     frames = set()
     for fcurve in bone_fcurves(rig, bones):
-        for point in fcurve.keyframe_points:
-            if point.type != GENERATED:
-                frames.add(round(point.co.x))
+        points = fcurve.keyframe_points
+        count = len(points)
+        if count == 0:
+            continue
+        co = np.empty(2 * count, dtype=np.float32)
+        types = np.empty(count, dtype=np.int32)
+        points.foreach_get("co", co)
+        points.foreach_get("type", types)
+        frames.update(np.round(co[0::2][types != _GENERATED_VALUE]).astype(int).tolist())
     return sorted(frames)
 
 
@@ -89,19 +98,29 @@ def check_limbs_fk(rig, rig_profile, start, end):
 
 
 def find_key_frames(rig, rig_profile):
-    """The key poses: frames where a write control of the profile has a user key.
-    Raises ValueError if there are fewer than two, or if a limb is in IK on the range."""
+    """The key poses: frames where a write control of the profile has a user key (sorted, maybe empty).
+    Raises ValueError if the profile has no control to write."""
     controls = [b.write_bone for b in rig_profile.roles if b.write_bone]
     if not controls:
         raise ValueError(f"The rig profile of '{rig.name}' has no control to write: load a preset or map the roles.")
-    every_user_key = user_key_frames(rig)
-    if every_user_key:
-        check_limbs_fk(rig, rig_profile, every_user_key[0], every_user_key[-1])
-    frames = user_key_frames(rig, controls)
-    if len(frames) < 2:
-        raise ValueError("At least two key poses are needed: frames where a control of the rig profile has a key "
-                         "whose type isn't Generated.")
-    return frames
+    return user_key_frames(rig, controls)
+
+
+def generation_range(rig, rig_profile):
+    """(start frame, end frame, key frames between them) of the character's next generation: from the first to
+    the last key pose, or its custom range (key poses outside it are ignored).
+    Raises ValueError if the key poses don't make a range."""
+    key_frames = find_key_frames(rig, rig_profile)
+    state = rig.retargetor
+    if state.range_mode == 'CUSTOM':
+        start, end = state.range_start, state.range_end
+    else:
+        if len(key_frames) < 2:
+            found = "No key pose" if not key_frames else f"One key pose (frame {key_frames[0]})"
+            raise ValueError(f"{found}: the range goes from the first key pose to the last one. Use a custom "
+                             "range, or key more poses on the controls of the rig profile.")
+        start, end = key_frames[0], key_frames[-1]
+    return start, end, [frame for frame in key_frames if start <= frame <= end]
 
 
 def remove_generated_keys(rig, bones, start, end):
@@ -215,9 +234,9 @@ def place_model(model, rig, view_layer):
 
 ### Request and result
 
-def build_request(context, rig, model, backend, rig_profile, key_frames, prompt="", seed=None):
-    """Snap the model to the rig on each key frame and read its poses.
-    Returns (GenerationRequest, translation scale rig -> model, retargeting errors)."""
+def build_request(context, rig, model, backend, rig_profile, start, end, key_frames, prompt="", seed=None):
+    """Snap the model to the rig on each key frame, and on the start frame (the request's origin), and read
+    its poses. Returns (GenerationRequest, translation scale rig -> model, retargeting errors)."""
     scene, view_layer = context.scene, context.view_layer
     skeleton = armature_skeleton(model)
     pairs = core_profile.compose(rig_profile, backend.joint_map, core_profile.TO_MODEL)
@@ -229,19 +248,21 @@ def build_request(context, rig, model, backend, rig_profile, key_frames, prompt=
         raise ValueError(f"Unable to compare the sizes of '{rig.name}' and of the model: map more roles.")
     retargeter = Retargeter(rig, model, pairs, scale[0])
 
-    key_poses = {}
+    poses = {}
     original_frame = scene.frame_current
     try:
-        for frame in key_frames:
+        for frame in sorted(set(key_frames) | {start}):
             scene.frame_set(frame)
             retargeter.snap_pose(view_layer)
-            key_poses[frame] = read_pose(model, skeleton.names, skeleton.root, world=False)
+            poses[frame] = read_pose(model, skeleton.names, skeleton.root, world=False)
     finally:
         scene.frame_set(original_frame)
 
     caps = backend.capabilities
-    request = GenerationRequest(key_frames[0], key_frames[-1], scene.render.fps / scene.render.fps_base, key_poses,
-                                prompt=prompt if caps.prompt else "", seed=seed if caps.seed else None)
+    request = GenerationRequest(start, end, scene.render.fps / scene.render.fps_base,
+                                {frame: poses[frame] for frame in key_frames},
+                                prompt=prompt if caps.prompt else "", seed=seed if caps.seed else None,
+                                origin=poses[start])
     backend.check_request(request)
     return request, scale[0], retargeter.errors
 
@@ -328,6 +349,7 @@ class GenerationTask:
         self.worker = None
         self.job = None
         self.stage = ""
+        self.start_frame = self.end_frame = 0
         self.key_frames = []
         self.rig_profile = None
         self.translation_scale = 1.0
@@ -374,7 +396,13 @@ class GenerationTask:
         self.rig_name = rig.name
         self.backend = active_backend(context)
         self.rig_profile = rig.data.retargetor_profile.to_core()
-        self.key_frames = find_key_frames(rig, self.rig_profile)
+        self.start_frame, self.end_frame, self.key_frames = generation_range(rig, self.rig_profile)
+        scene = context.scene
+        problem = self.backend.range_problem(self.start_frame, self.end_frame,
+                                             scene.render.fps / scene.render.fps_base, len(self.key_frames))
+        if problem:
+            raise ValueError(problem)
+        check_limbs_fk(rig, self.rig_profile, self.start_frame, self.end_frame)
         self.worker = registry.worker_for(self.backend, backend_settings(context, self.backend))
         model = model_armature(context, rig, self.backend)
         if model is None:
@@ -388,7 +416,8 @@ class GenerationTask:
         state = rig.retargetor
         start = time.perf_counter()
         request, self.translation_scale, errors = build_request(
-            context, rig, model, self.backend, self.rig_profile, self.key_frames, state.prompt, state.seed)
+            context, rig, model, self.backend, self.rig_profile, self.start_frame, self.end_frame, self.key_frames,
+            state.prompt, state.seed)
         self.timings["key poses"] = time.perf_counter() - start
         self.errors |= errors
         self.stage = GENERATING
@@ -433,7 +462,7 @@ class GenerationTask:
             motion = protocol.motion_from_frames(self.job.frames, skeleton.names)
             self.worker.forget(self.job)
             self.writer = MotionWriter(context, rig, model, self.backend, self.rig_profile, motion,
-                                       self.key_frames[0], self.key_frames[-1], self.translation_scale)
+                                       self.start_frame, self.end_frame, self.translation_scale)
             self.stage = WRITING
             return False
         return True

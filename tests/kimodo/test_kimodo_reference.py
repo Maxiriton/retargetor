@@ -70,8 +70,8 @@ class TestKimodoReference(unittest.TestCase):
     def test_constraints_match_phase0(self):
         """Constraints built from Blender-convention poses = those Phase 0 rebuilt from the Blender armature"""
         request = self.request_from_npz()
-        constraints, canonical, indices, count = convert.request_to_constraints(request, self.layout, 30.0)
-        self.assertEqual((indices, count), ([0, 55], 56))
+        constraints, canonical, timing = convert.request_to_constraints(request, self.layout, 30.0)
+        self.assertEqual((timing.key_indices, timing.count), ([0, 55], 56))
         ours = constraints[0]
         mine = quat.from_axis_angle(np.array(ours["local_joints_rot"]))
         theirs = quat.from_axis_angle(np.array(self.reference["local_joints_rot"]))
@@ -92,7 +92,7 @@ class TestKimodoReference(unittest.TestCase):
 
         skel30 = SOMASkeleton30()
         request = self.request_from_npz()
-        constraints, canonical, _i, _n = convert.request_to_constraints(request, self.layout, 30.0)
+        constraints, canonical, _t = convert.request_to_constraints(request, self.layout, 30.0)
         constraint = load_constraints_lst(constraints, skel30)[0]
         positions = constraint.global_joints_positions.detach().cpu().numpy()  # (2, 30, 3)
         index30 = [self.layout.index(n) for n in self.layout.names30]
@@ -111,12 +111,12 @@ class TestKimodoReference(unittest.TestCase):
     def test_output_back_to_blender(self):
         """Kimodo's output, converted, gives back the Phase 0 global rotations and root positions"""
         request = self.request_from_npz()
-        _cons, _canonical, indices, _count = convert.request_to_constraints(request, self.layout, 30.0)
+        _cons, _canonical, timing = convert.request_to_constraints(request, self.layout, 30.0)
         identity = convert.Canonical(origin=np.zeros(3), rotation=np.array((1.0, 0.0, 0.0, 0.0)))
         start, end = ROUNDTRIP_FRAMES
         rot = self.npz["global_rot_mats"][start:end + 1]
         root = self.npz["posed_joints"][start:end + 1, self.layout.index(self.layout.root)]
-        rotations, positions = convert.output_to_blender(rot, root, identity, request, indices)
+        rotations, positions = convert.output_to_blender(rot, root, identity, request, timing)
         self.assertEqual(rotations.shape, (end - start + 1, 77, 4))
         back = quat.from_matrix(quat.to_matrix(convert.quat_to_kimodo(rotations)))
         self.assertLess(float(np.max(angles_deg(back, quat.from_matrix(rot)))), 1e-4)

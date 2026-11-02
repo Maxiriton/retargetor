@@ -8,7 +8,7 @@ class InterpolateBackend(Backend):
     label = "Interpolation (test)"
     description = "Spherical interpolation between the key poses, without any model. For tests"
     developer_only = True
-    capabilities = Capabilities(streaming=True)
+    capabilities = Capabilities(streaming=True, min_key_poses=2)
     # Its skeleton has one joint per role, named after the role
     joint_map = {role.id: role.id for role in ROLES}
     load_timeout = 60.0

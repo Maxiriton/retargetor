@@ -76,7 +76,7 @@ def run_kimodo_tests(args, env, scratch, rig_file):
         run_blender(args.blender, "dump_pose.py", ["rig", dump, "1", "120"], blend=spike_result)
         base_args.append(dump)
     results["kimodo_base"] = run_blender(args.blender, "test_generate_kimodo.py", base_args, blend=rig_file, env=env)
-    for mode in ("heading", "fps24"):
+    for mode in ("heading", "fps24", "range"):
         results[f"kimodo_{mode}"] = run_blender(args.blender, "test_generate_kimodo.py",
                                                 [mode, args.kimodo_python, out_dir], blend=rig_file, env=env)
     return results

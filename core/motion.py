@@ -89,7 +89,9 @@ class Motion:
 class GenerationRequest:
     """What a backend is asked to generate: a motion from start_frame to end_frame that hits the key poses.
 
-    key_poses: {Blender frame: Pose}, in the model's skeleton (its joint names).
+    key_poses: {Blender frame: Pose}, in the model's skeleton (its joint names). May be empty (prompt only).
+    origin: the character's pose on start_frame (a key pose there, or wherever the character stands), in the
+    model's skeleton. Not a constraint: it tells where the motion starts and which way the character faces.
     """
     start_frame: int
     end_frame: int
@@ -97,6 +99,7 @@ class GenerationRequest:
     key_poses: dict[int, Pose] = field(default_factory=dict)
     prompt: str = ""
     seed: int | None = None
+    origin: Pose | None = None
 
     def __post_init__(self):
         if self.end_frame < self.start_frame:
@@ -120,6 +123,7 @@ class GenerationRequest:
             "key_poses": {str(frame): pose.to_dict() for frame, pose in sorted(self.key_poses.items())},
             "prompt": self.prompt,
             "seed": self.seed,
+            "origin": self.origin.to_dict() if self.origin is not None else None,
         }
 
     @classmethod
@@ -131,4 +135,5 @@ class GenerationRequest:
             key_poses={int(frame): Pose.from_dict(p) for frame, p in data.get("key_poses", {}).items()},
             prompt=data.get("prompt", ""),
             seed=data.get("seed"),
+            origin=Pose.from_dict(data["origin"]) if data.get("origin") is not None else None,
         )

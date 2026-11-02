@@ -14,6 +14,7 @@ The animation itself is the source of truth: key poses are not stored in a separ
 - **A frame is a key pose** as soon as **any** mapped control has a user key on it.
 - **Partial poses**: key types are per F-curve, so a frame where only some controls are keyed gives a partial constraint (for example hand only), when the backend supports it.
 - **User keys are never overwritten.** Generation only writes between them.
+- **The range** of a generation goes from the first key pose to the last one, or is set on the character (start frame and duration). Key poses outside the range are ignored. Without a key pose on the start frame, the motion starts where the character stands, facing its way; with no key pose at all, the prompt alone drives it.
 - **Regenerating a segment** deletes the `GENERATED` keys in that segment and writes new ones.
 - **Editing a generated key retypes it** as a user key, so the edit is kept and becomes a constraint for the next generation. A generated key can also be promoted by hand by changing its type.
 - **Density**: for now, the backend's output is used as is (a key on every output frame). Curve simplification may come later.

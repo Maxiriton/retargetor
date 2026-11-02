@@ -66,11 +66,11 @@ class KimodoHandler:
         from kimodo.constraints import load_constraints_lst
         from kimodo.tools import seed_everything
 
-        constraints, canonical, key_indices, num_frames = convert.request_to_constraints(
-            request, layout, joints.MODEL_FPS)
+        constraints, canonical, timing = convert.request_to_constraints(request, layout, joints.MODEL_FPS)
+        num_frames = timing.count
         if request.seed is not None:
             seed_everything(int(request.seed))
-        constraint_list = load_constraints_lst(constraints, self.model.skeleton)
+        constraint_list = load_constraints_lst(constraints, self.model.skeleton) if constraints else []
 
         def progress_bar(steps):
             steps = list(steps)
@@ -91,7 +91,7 @@ class KimodoHandler:
 
         root_index = layout.index(layout.root)
         rotations, positions = convert.output_to_blender(
-            output["global_rot_mats"][0], output["posed_joints"][0][:, root_index], canonical, request, key_indices)
+            output["global_rot_mats"][0], output["posed_joints"][0][:, root_index], canonical, request, timing)
         context.send_frames(request.start_frame, request.fps, rotations, positions)
         print(f"Generated {num_frames} model frames, heading {canonical.heading:.3f} rad", file=sys.stderr)
 
