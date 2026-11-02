@@ -103,8 +103,10 @@ class RTGTR_snap_full_pose(Operator):
     )
 
     repetitions : IntProperty(
-        name="Repetitions",
-        default=5,
+        name="Sweeps",
+        description="Bones are snapped one hierarchy level at a time: one sweep is enough, unless bones depend "
+                    "on each other through constraints",
+        default=1,
         min=1
     )
 
@@ -121,7 +123,7 @@ class RTGTR_snap_full_pose(Operator):
             return {'CANCELLED'}
 
         report_snap_errors(self, retargeter.errors)
-        self.report({'INFO'}, f"Snapping done for the full pose in {self.repetitions} iterations.")
+        self.report({'INFO'}, f"Snapping done for the full pose ({self.repetitions} sweep(s)).")
         return {'FINISHED'}
 
 

@@ -108,6 +108,10 @@ def set_rotation(pose_bone, rotation_mode, q):
         pose_bone.rotation_euler = q.to_euler(rotation_mode, previous)
 
 
+def _same_matrix(a, b, tolerance=1e-6):
+    return all(abs(x - y) <= tolerance for row_a, row_b in zip(a, b) for x, y in zip(row_a, row_b))
+
+
 class _ResolvedPair:
     """A BonePair with its pose bones and rest offsets looked up once."""
     __slots__ = ("pair", "src_pose_bone", "tgt_pose_bone", "roll", "rest_offset", "correction", "rotation_mode")
@@ -163,6 +167,9 @@ class Retargeter:
             if bone.name in self.resolved:
                 self.order.append(self.resolved[bone.name])
             stack.extend(reversed(bone.children))
+
+        # Snapping levels, worked out on the first snap (see _dependency_levels)
+        self._levels = None
 
     @property
     def target_bones(self):
@@ -227,15 +234,65 @@ class Retargeter:
                 target_name, f"The target bone '{target_name}' is not mapped to a source bone."))
         self._snap(resolved, add_roll=add_roll, add_correction=add_correction)
 
-    def snap_pose(self, view_layer, add_roll=True, add_correction=True, repetitions=5):
-        """Snap every mapped target bone at the current frame, parents first.
-        The whole pass is repeated, since a child reads its parent's matrix, which is only refreshed by an update."""
-        for _iteration in range(repetitions):
-            for resolved in self.order:
-                self._snap(resolved, add_roll=add_roll, add_correction=add_correction)
-            view_layer.update()
+    def _dependency_levels(self, view_layer):
+        """Target bones grouped in levels: a bone depends only on bones of lower levels.
 
-    def bake(self, scene, view_layer, frames, keytype='KEYFRAME', repetitions=5):
+        A bone reads the evaluated matrices of the bones it depends on, and only a scene update refreshes them:
+        snapping level by level, with an update in between, gives every bone its final input, so one sweep is
+        exact. Dependencies are found by turning each target bone in turn and looking at which other target
+        bones move: they go through the hierarchy, but also through constraints (Rigify's FK controls follow
+        their parent control through ORG and MCH bones), which the hierarchy alone doesn't show."""
+        bones = [r.tgt_pose_bone for r in self.order]
+        saved = [pb.matrix_basis.copy() for pb in bones]
+        view_layer.update()
+        rest = [pb.matrix.copy() for pb in bones]
+        depends = [set() for _ in bones]
+        turn = Matrix.Rotation(0.5, 4, 'X')
+        for j, pb in enumerate(bones):
+            pb.matrix_basis = saved[j] @ turn
+            view_layer.update()
+            for i, other in enumerate(bones):
+                if i != j and not _same_matrix(other.matrix, rest[i]):
+                    depends[i].add(j)
+            pb.matrix_basis = saved[j]
+        view_layer.update()
+
+        # Longest chain of dependencies above each bone. Bones depending on each other (a cycle through
+        # constraints) can't be ordered: they share a level and need more sweeps.
+        level = [0] * len(bones)
+        for _round in range(len(bones)):
+            changed = False
+            for i, deps in enumerate(depends):
+                wanted = max((level[j] + 1 for j in deps if i not in depends[j]), default=0)
+                if wanted > level[i] and wanted < len(bones):
+                    level[i] = wanted
+                    changed = True
+            if not changed:
+                break
+        levels = [[] for _ in range(max(level, default=-1) + 1)]
+        for i, resolved in enumerate(self.order):
+            levels[level[i]].append(resolved)
+        return [group for group in levels if group]
+
+    def levels(self, view_layer):
+        """The snapping levels (computed once, see _dependency_levels)"""
+        if self._levels is None:
+            self._levels = self._dependency_levels(view_layer)
+        return self._levels
+
+    def snap_pose(self, view_layer, add_roll=True, add_correction=True, repetitions=1, final_update=True):
+        """Snap every mapped target bone at the current frame, one dependency level at a time (see
+        _dependency_levels): one sweep is exact. repetitions: number of sweeps, only useful for bones that
+        depend on each other. final_update: refresh the scene after the last level (not needed to key)."""
+        levels = self.levels(view_layer)
+        for sweep in range(repetitions):
+            for index, level in enumerate(levels):
+                for resolved in level:
+                    self._snap(resolved, add_roll=add_roll, add_correction=add_correction)
+                if final_update or sweep < repetitions - 1 or index < len(levels) - 1:
+                    view_layer.update()
+
+    def bake(self, scene, view_layer, frames, keytype='KEYFRAME', repetitions=1):
         """Snap and key the mapped target bones on each of the given frames (Blender frame numbers).
         Rotations are keyed in each bone's own rotation mode (quaternions with continuous signs); locations only
         on the bones flagged "Use Translation". The current frame is restored at the end. Returns the number of frames baked."""
@@ -247,7 +304,7 @@ class Retargeter:
         try:
             for frame in frames:
                 scene.frame_set(frame)
-                self.snap_pose(view_layer, repetitions=repetitions)
+                self.snap_pose(view_layer, repetitions=repetitions, final_update=False)
 
                 for bone, use_translation, quaternion in keyed:
                     if quaternion:
@@ -261,14 +318,14 @@ class Retargeter:
         return len(frames)
 
 
-def snap_pose(context, source_obj, target_obj, pairs, translation_scale=1.0, add_roll=True, repetitions=5):
+def snap_pose(context, source_obj, target_obj, pairs, translation_scale=1.0, add_roll=True, repetitions=1):
     """Snap the target armature onto the source at the current frame. Returns the set of error messages."""
     retargeter = Retargeter(source_obj, target_obj, pairs, translation_scale)
     retargeter.snap_pose(context.view_layer, add_roll=add_roll, repetitions=repetitions)
     return retargeter.errors
 
 
-def bake(context, source_obj, target_obj, pairs, frames, translation_scale=1.0, keytype='KEYFRAME', repetitions=5):
+def bake(context, source_obj, target_obj, pairs, frames, translation_scale=1.0, keytype='KEYFRAME', repetitions=1):
     """Snap and key the target armature on the given frames. Returns the set of error messages."""
     retargeter = Retargeter(source_obj, target_obj, pairs, translation_scale)
     retargeter.bake(context.scene, context.view_layer, frames, keytype=keytype, repetitions=repetitions)

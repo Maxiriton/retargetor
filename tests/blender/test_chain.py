@@ -80,7 +80,8 @@ def compare_matrices(obj, reference, frames, names=None):
                 continue
             old = Matrix(rows)
             new = obj.matrix_world @ obj.pose.bones[name].matrix
-            worst_rot = max(worst_rot, math.degrees(old.to_quaternion().rotation_difference(new.to_quaternion()).angle))
+            angle = math.degrees(old.to_quaternion().rotation_difference(new.to_quaternion()).angle)
+            worst_rot = max(worst_rot, min(angle, 360.0 - angle))
             worst_loc = max(worst_loc, (old.to_translation() - new.to_translation()).length * 100)
     return worst_rot, worst_loc
 
@@ -187,14 +188,19 @@ def main(mode, spike_dir, reference_dir):
                 a = angle_deg(bone_direction(rig, b.read_bone), bone_direction(generated, joints[b.role]))
                 total, count, worst = total + a, count + 1, max(worst, a)
         lowest_toe = min(lowest_toe, min((rig.matrix_world @ rig.pose.bones[n].tail).z for n in ("ORG-toe.L", "ORG-toe.R")))
-    checks.below(total / count, 0.1, f"rig follows the generated motion over {len(clip)} frames, mean limb direction (deg)")
-    checks.below(worst, 2.0, "rig follows the generated motion, worst limb direction (deg)")
+    checks.below(total / count, 0.001, f"rig follows the generated motion over {len(clip)} frames, mean limb direction (deg)")
+    checks.below(worst, 0.01, "rig follows the generated motion, worst limb direction (deg)")
     checks.check(-0.02 < lowest_toe < 0.1, f"feet on the floor (lowest toe tip {lowest_toe * 100:.1f} cm)")
 
     reference = bootstrap.load_json(os.path.join(reference_dir, "rig_result.json"))
-    rot, loc = compare_matrices(rig, reference, clip, names=set(org_bones))
-    checks.below(rot, 0.001, "rig vs the spike's result over the clip, worst rotation of the ORG bones (deg)")
+    # The spike snapped with 5 fixed passes, too few for the hands (6 levels of dependencies): they were up to
+    # 1.9 degrees off the generated motion. Snapping by dependency level is exact (checked just above).
+    hands = {"ORG-hand.L", "ORG-hand.R"}
+    rot, loc = compare_matrices(rig, reference, clip, names=set(org_bones) - hands)
+    checks.below(rot, 0.001, "rig vs the spike's result over the clip, worst rotation of the ORG bones but the hands (deg)")
     checks.below(loc, 0.001, "rig vs the spike's result over the clip, worst position of the ORG bones (cm)")
+    rot, _loc = compare_matrices(rig, reference, clip, names=hands)
+    checks.below(rot, 2.0, "rig vs the spike's result, hands (deg, the spike's were not converged)")
 
     keys = rig.animation_data.action
     from bpy_extras.anim_utils import action_get_channelbag_for_slot
