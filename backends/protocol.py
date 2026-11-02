@@ -38,6 +38,13 @@ import traceback
 
 import numpy as np
 
+# Inside the add-on this module is <add-on>.backends.protocol; in a worker, backends.protocol with the add-on's
+# folder on sys.path
+try:
+    from ..core.motion import GenerationRequest, Motion, Pose
+except ImportError:
+    from core.motion import GenerationRequest, Motion, Pose
+
 PROTOCOL_VERSION = 1
 
 _DTYPES = {"f32": "<f4", "f64": "<f8"}
@@ -79,8 +86,6 @@ def frames_message(request_id, start_frame, fps, rotations, root_positions):
 def motion_from_frames(messages, joint_names):
     """Join "frames" messages (in any order, contiguous) into a core.motion.Motion.
     Raises ValueError if they leave a gap, overlap or don't match the joints."""
-    from core.motion import Motion, Pose  # noqa: imported here so the module loads without the add-on's path
-
     if not messages:
         raise ValueError("The backend returned no frames.")
     chunks = sorted(messages, key=lambda m: m["start_frame"])
@@ -192,7 +197,6 @@ class WorkerLoop:
                         load(context)
                     self.send({"type": "ready", "id": request_id})
                 elif kind == "generate":
-                    from core.motion import GenerationRequest
                     self.handler.generate(GenerationRequest.from_dict(message["request"]), context)
                     context.check_cancelled()
                     self.send({"type": "done", "id": request_id})
@@ -208,9 +212,3 @@ class WorkerLoop:
                 self.cancelled.discard(request_id)
 
 
-def add_addon_path():
-    """Put the add-on's folder on sys.path, so a worker script can import core.* and backends.*
-    (workers run with python -I, which leaves the script's folder out)."""
-    folder = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    if folder not in sys.path:
-        sys.path.insert(0, folder)

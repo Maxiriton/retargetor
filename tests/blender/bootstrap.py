@@ -43,7 +43,21 @@ def register_addon():
     package = sys.modules["retargetor"]
     if not hasattr(bpy.types.Object, "retargetor"):
         package.register()
+    # The add-on isn't enabled through Blender here: give it an entry so its preferences exist
+    if bpy.context.preferences.addons.get("retargetor") is None:
+        bpy.context.preferences.addons.new().module = "retargetor"
     return package
+
+
+def set_backend(backend_id, developer=False, **settings):
+    """Choose the active backend in the add-on preferences, and set its settings"""
+    prefs = bpy.context.preferences.addons["retargetor"].preferences
+    prefs.developer = developer
+    prefs.backend = backend_id
+    backend_settings = getattr(prefs, f"settings_{backend_id}", None)
+    for name, value in settings.items():
+        setattr(backend_settings, name, value)
+    return prefs
 
 
 def load_json(path):

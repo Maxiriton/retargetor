@@ -2,6 +2,9 @@
 import bpy
 from bpy.types import Panel, UIList
 
+from . import generation
+from .backends import process, registry
+from .preferences import active_backend, ADDON_ID
 from .properties import get_character
 
 class RETARGETOR_PT_RetargetPanel(Panel):
@@ -180,6 +183,65 @@ class RETARGETOR_PT_RigProfilePanel(Panel):
             layout.operator("retargetor.snap_fk_to_ik", icon='SNAP_ON')
 
 
+class RETARGETOR_PT_GeneratePanel(Panel):
+    """Generate the in-betweens of the character with the active backend"""
+    bl_label = "Generate"
+    bl_idname = "RETARGETOR_PT_GeneratePanel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Retarget Tool'
+
+    def draw(self, context):
+        layout = self.layout
+        backend = active_backend(context)
+
+        row = layout.row(align=True)
+        row.label(text=f"Backend: {backend.label}", icon='OUTLINER_OB_ARMATURE')
+        props = row.operator("preferences.addon_show", text="", icon='PREFERENCES')
+        props.module = ADDON_ID
+
+        worker = registry.existing_worker(backend.id)
+        row = layout.row(align=True)
+        if worker is None or worker.state == process.STOPPED:
+            row.label(text="Stopped", icon='RADIOBUT_OFF')
+            row.operator("retargetor.backend_start", text="Start", icon='PLAY')
+        else:
+            if worker.state == process.STARTING or (worker.busy and not worker.loaded):
+                row.label(text="Starting", icon='SORTTIME')
+            elif worker.busy:
+                row.label(text="Busy", icon='SORTTIME')
+            elif worker.loaded:
+                row.label(text="Model loaded", icon='CHECKMARK')
+            else:
+                row.label(text="Running", icon='RADIOBUT_ON')
+            if not worker.loaded and not worker.busy:
+                row.operator("retargetor.backend_start", text="Load", icon='PLAY')
+            row.operator("retargetor.backend_stop", text="Stop", icon='PAUSE')
+        if worker is not None and worker.error:
+            box = layout.box()
+            for line in worker.error.splitlines()[:6]:
+                box.label(text=line, icon='ERROR')
+
+        rig, state = get_character(context)
+        if rig is None:
+            layout.label(text="Choose the character in the Retarget panel")
+            return
+        layout.label(text=f"Character: {rig.name}", icon='ARMATURE_DATA')
+        caps = backend.capabilities
+        if caps.prompt:
+            layout.prop(state, "prompt", text="")
+        if caps.seed:
+            layout.prop(state, "seed")
+
+        task = generation.current_task
+        if task is not None:
+            row = layout.row(align=True)
+            row.progress(factor=task.fraction, type='BAR', text=f"{task.message} {task.fraction * 100:.0f}%")
+            row.operator("retargetor.cancel_generation", text="", icon='CANCEL')
+        else:
+            layout.operator("retargetor.generate_inbetweens", icon='ANIM')
+
+
 class RTGTR_UL_Roles(UIList):
     """Humanoid roles of a rig profile: the bone read and the control written for each"""
     def draw_item(self, context, layout, data, item, icon, active_data, active_property, index):
@@ -210,6 +272,7 @@ classes = (
     RTGTR_UL_Limbs,
     RETARGETOR_PT_RetargetPanel,
     RETARGETOR_PT_RigProfilePanel,
+    RETARGETOR_PT_GeneratePanel,
 )
 
 def register():

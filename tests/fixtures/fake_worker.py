@@ -14,8 +14,6 @@ import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from backends import protocol  # noqa: E402
-
-protocol.add_addon_path()
 from core.skeleton import Joint, Skeleton  # noqa: E402
 
 

@@ -28,12 +28,14 @@ bl_info = {
 import bpy
 from bpy.app.handlers import persistent
 
+from . import preferences
 from . import properties
 from . import migration
 from . import ui
 from . import retarget_operators
 from . import setup_operators
 from . import profile_operators
+from . import generate_operators
 from .properties import get_character
 
 # Name of the last active bone seen by the selection handler (UI state, not saved)
@@ -82,12 +84,14 @@ def check_bone_selection_handler(scene):
 
 
 addon_modules = (
+    preferences,
     properties,
     migration,
     ui,
     setup_operators,
     retarget_operators,
     profile_operators,
+    generate_operators,
 )
 
 def register():

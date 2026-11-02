@@ -99,6 +99,14 @@ class RTGTR_CharacterState(PropertyGroup):
     recording_initial_rotation: FloatVectorProperty(
         name="Initial Rotation", description="Rotation of the bone when the recording started",
         size=4, default=IDENTITY_QUATERNION, override=OVERRIDABLE)
+    # Generation (one prompt and one seed per character for now)
+    prompt: StringProperty(name="Prompt", description="Text describing the motion to generate",
+                           override=OVERRIDABLE)
+    seed: IntProperty(name="Seed", default=0, min=0,
+                      description="Same seed, same key poses and same prompt: same motion", override=OVERRIDABLE)
+    model_armature: PointerProperty(type=bpy.types.Object, name="Model Armature", poll=is_armature,
+                                    description="The motion model's skeleton, built by the add-on for this character",
+                                    override=OVERRIDABLE)
 
     def pairs(self):
         """The bone list as BonePairs (rows without a target bone are left out)"""

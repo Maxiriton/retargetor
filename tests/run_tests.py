@@ -81,6 +81,17 @@ def main():
         os.makedirs(lib_dir)
         results["library_override"] = run_blender(args.blender, "test_library_override.py", [lib_dir], env=env)
 
+        # The Phase 1 Rigify rig with its key poses, made fresh (needs only Rigify)
+        rig_dir = os.path.join(scratch, "rig")
+        os.makedirs(rig_dir)
+        run_blender(args.blender, os.path.join(REPO, "spikes", "phase1", "make_rig.py"), [rig_dir])
+        rig_file = os.path.join(rig_dir, "rig_keyposes.blend")
+        if os.path.exists(rig_file):
+            results["generate"] = run_blender(args.blender, "test_generate.py", blend=rig_file, env=env)
+        else:
+            print("generate: the test rig could not be made (spikes/phase1/make_rig.py)")
+            results["generate"] = False
+
         legacy_addon, legacy_out = os.path.join(scratch, "legacy_addon"), os.path.join(scratch, "legacy")
         os.makedirs(legacy_addon)
         os.makedirs(legacy_out)

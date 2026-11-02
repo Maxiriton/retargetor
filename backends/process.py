@@ -90,6 +90,8 @@ class Worker:
         self.state = STOPPED
         self.backend_id = ""
         self.error = ""
+        # The model was loaded (a "load" or "generate" request succeeded since the start)
+        self.loaded = False
         self.process = None
         self.jobs = {}
         self._next_id = 1
@@ -116,6 +118,7 @@ class Worker:
             raise WorkerError(f"Unable to start the backend: {e}") from e
         self.state = STARTING
         self.error = ""
+        self.loaded = False
         self._started_at = time.perf_counter()
         self._messages = queue.Queue()
         self._stderr.clear()
@@ -166,6 +169,7 @@ class Worker:
             job._finish(CANCELLED, "The backend was stopped.")
         self._release()
         self.state = STOPPED
+        self.loaded = False
 
     def _release(self):
         """Forget the process, closing its pipes"""
@@ -245,6 +249,8 @@ class Worker:
         job = self.jobs.get(message.get("id"))
         if job is not None:
             job.handle(message)
+            if job.kind in ("load", "generate") and job.state == DONE:
+                self.loaded = True
         elif kind == "error":
             self.error = message.get("message", "")
 
@@ -262,6 +268,7 @@ class Worker:
             self.error = f"The backend stopped (exit code {code}).\n{tail}".strip()
         self._release()
         self.state = STOPPED
+        self.loaded = False
 
     def wait(self, job, timeout=None, poll=0.01):
         """Block until the job is finished (pumping the messages). Raises WorkerError on timeout."""
