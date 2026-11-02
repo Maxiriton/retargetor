@@ -29,9 +29,12 @@ def main():
     scene = bpy.context.scene
     rig = bpy.data.objects["rig"]
     bpy.context.view_layer.objects.active = rig
-    bpy.ops.retargetor.profile_load_preset(preset="rigify_human")
     scene.retargetor_target = rig
-    rig_profile = rig.data.retargetor_profile.to_core()
+    # An empty profile (cleared after choosing the character): the generation applies the preset itself
+    from retargetor.profile_operators import detect_preset
+    rig.data.retargetor_profile.roles.clear()
+    rig.data.retargetor_profile.limbs.clear()
+    rig_profile = detect_preset(rig.data)[1]
     switches = {limb.name: rig.pose.bones[limb.switch_bone] for limb in rig_profile.limbs}
     checks.check(all(s["IK_FK"] == 0.0 for s in switches.values()), "every limb starts in IK")
 
@@ -53,6 +56,8 @@ def main():
     task = generation.GenerationTask()
     checks.check(task.run(bpy.context, rig) and task.result is not None, "generated with every limb in IK")
     print("FINDING " + "; ".join(task.notes))
+    checks.check(len(rig.data.retargetor_profile.roles) == 23 and "Rigify" in task.notes[0],
+                 "the generation applied the Rigify preset to the empty profile")
     checks.check(task.modified, "the task knows the rig was changed before generating")
     checks.check(all(abs(s["IK_FK"] - 1.0) < 1e-6 for s in switches.values()), "every limb switched to FK")
     angle, dist = worst_change(rig, ik_pose)

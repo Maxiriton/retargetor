@@ -76,6 +76,7 @@ The animation itself is the source of truth: key poses are not stored in a separ
 | **JSON** | Export / import of a rig profile | Reuse a mapping on another similar rig. |
 | **Computed, not stored** | Translation scale | Depends on both skeletons together. |
 
+- **Presets are detected**: an empty rig profile gets the first preset whose bones all exist in the armature, when the character is chosen as the panel's target, or when generating (on a linked armature, the preset is used without being saved). The profile remembers the preset it came from.
 - **Linked rigs** (checked in Phase 2, `tests/blender/test_library_override.py`): the profile comes with a rig linked from a library, so it is set up once in the rig's file.
   - Linked without override: profile and character state are read-only (Python can change them in memory, nothing is saved).
   - Library override of the character, default or fully editable: the **Object** is overridden, so the character state can be edited and is saved (bone list rows can be added). The **Armature data stays linked**, so the profile is read-only in the shot; the Rig Profile panel says so.

@@ -45,6 +45,47 @@ def load_profile_file(path):
     return core_profile.RigProfile.from_dict(data)
 
 
+# {preset path: (modification time, RigProfile)}: presets are read once (the panel looks for one on each redraw)
+_preset_cache = {}
+
+
+def preset_profile(path):
+    """The RigProfile of a preset file, read once. Raises ValueError."""
+    mtime = os.path.getmtime(path)
+    cached = _preset_cache.get(path)
+    if cached is None or cached[0] != mtime:
+        cached = (mtime, load_profile_file(path))
+        _preset_cache[path] = cached
+    return cached[1]
+
+
+def detect_preset(armature):
+    """(display name, RigProfile) of the first preset whose bones all exist in the armature, or None"""
+    for _key, (path, name) in preset_files().items():
+        try:
+            rig_profile = preset_profile(path)
+        except (OSError, ValueError):
+            continue
+        if rig_profile.roles and not missing_bones(armature, rig_profile):
+            return name, rig_profile
+    return None
+
+
+def apply_detected_preset(armature):
+    """If the armature's rig profile is empty and editable, fill it with the preset matching its bones.
+    Returns the preset's name, or "" if nothing was applied."""
+    profile = armature.retargetor_profile
+    if len(profile.roles) > 0 or not armature.is_editable:
+        return ""
+    detected = detect_preset(armature)
+    if detected is None:
+        return ""
+    name, rig_profile = detected
+    profile.from_core(rig_profile)
+    profile.source = name
+    return name
+
+
 def missing_bones(armature, rig_profile):
     """Names used by the profile that don't exist in the armature"""
     used = set()
@@ -58,8 +99,9 @@ def missing_bones(armature, rig_profile):
     return sorted(name for name in used if armature.bones.get(name) is None)
 
 
-def apply_profile(operator, armature, rig_profile, source):
+def apply_profile(operator, armature, rig_profile, source, preset_name=""):
     armature.retargetor_profile.from_core(rig_profile)
+    armature.retargetor_profile.source = preset_name
     missing = missing_bones(armature, rig_profile)
     if missing:
         operator.report({'WARNING'}, f"Profile loaded from {source}, but {len(missing)} bone(s) are missing in "
@@ -136,7 +178,7 @@ class RTGTR_OT_ProfileLoadPreset(Operator):
         except ValueError as e:
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
-        apply_profile(self, active_armature(context).data, rig_profile, f"the preset '{name}'")
+        apply_profile(self, active_armature(context).data, rig_profile, f"the preset '{name}'", name)
         return {'FINISHED'}
 
 

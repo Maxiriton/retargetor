@@ -104,8 +104,15 @@ def main():
     view_layer = bpy.context.view_layer
     rig = bpy.data.objects["rig"]
     view_layer.objects.active = rig
-    checks.check(bpy.ops.retargetor.profile_load_preset(preset="rigify_human") == {'FINISHED'}, "Rigify preset loaded")
+    # A Rigify rig needs no setup: choosing it as the character applies the Rigify preset
+    from retargetor.profile_operators import detect_preset
+    checks.check(len(rig.data.retargetor_profile.roles) == 0, "no rig profile at first")
+    detected = detect_preset(rig.data)
+    checks.check(detected is not None and detected[0].startswith("Rigify"), "the Rigify preset matches the rig")
     scene.retargetor_target = rig
+    checks.check(len(rig.data.retargetor_profile.roles) == 23 and rig.data.retargetor_profile.source == detected[0],
+                 f"choosing the character applied the preset ({rig.data.retargetor_profile.source})")
+    checks.check(detect_preset(bpy.data.armatures.new("empty")) is None, "no preset for an armature without its bones")
     rig_profile = rig.data.retargetor_profile.to_core()
     controls = [b.write_bone for b in rig_profile.roles if b.write_bone]
     org_bones = [b.read_bone for b in rig_profile.roles if b.read_bone]

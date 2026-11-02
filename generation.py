@@ -433,7 +433,7 @@ class GenerationTask:
     def start(self, context, rig):
         self.rig_name = rig.name
         self.backend = active_backend(context)
-        self.rig_profile = rig.data.retargetor_profile.to_core()
+        self.rig_profile = self._rig_profile(rig)
         self.start_frame, self.end_frame, self.key_frames = generation_range(rig, self.rig_profile)
         scene = context.scene
         problem = self.backend.range_problem(self.start_frame, self.end_frame,
@@ -455,6 +455,25 @@ class GenerationTask:
             self._check_job()
         else:
             self._send_request(context, rig, model)
+
+    def _rig_profile(self, rig):
+        """The rig's profile; an empty one gets the preset matching the armature's bones (saved on the armature
+        when it can be edited, used as is on a linked armature). Raises ValueError if none matches."""
+        from .profile_operators import apply_detected_preset, detect_preset
+        armature = rig.data
+        if len(armature.retargetor_profile.roles) > 0:
+            return armature.retargetor_profile.to_core()
+        name = apply_detected_preset(armature)
+        if name:
+            self.modified = True
+            self.notes.append(f"Rig profile of '{armature.name}': the preset '{name}' matches its bones, applied")
+            return armature.retargetor_profile.to_core()
+        detected = detect_preset(armature)
+        if detected is not None:
+            self.notes.append(f"Rig profile of '{armature.name}' (linked): the preset '{detected[0]}' is used")
+            return detected[1]
+        raise ValueError(f"The rig profile of '{armature.name}' is empty and no preset matches its bones: map its "
+                         "bones to the humanoid roles in the Rig Profile panel.")
 
     def _send_request(self, context, rig, model):
         state = rig.retargetor

@@ -207,6 +207,8 @@ class RTGTR_RigProfile(PropertyGroup):
     roles_active_index: IntProperty(default=0, override=OVERRIDABLE)
     limbs: CollectionProperty(type=RTGTR_LimbSnap, override=OVERRIDABLE_COLLECTION)
     limbs_active_index: IntProperty(default=0, override=OVERRIDABLE)
+    source: StringProperty(name="Preset", description="Preset the profile was loaded from (empty: set up by hand "
+                                                      "or imported)", override=OVERRIDABLE)
 
     def to_core(self):
         """The profile as a core.profile.RigProfile. Raises ValueError on an invalid profile."""
@@ -272,6 +274,14 @@ classes = (
 )
 
 
+def update_target(scene, _context):
+    """A character whose rig profile is empty gets the preset matching its bones (Rigify...)"""
+    target = scene.retargetor_target
+    if target is not None and target.type == 'ARMATURE':
+        from .profile_operators import apply_detected_preset
+        apply_detected_preset(target.data)
+
+
 def get_character(context):
     """(target armature object, its RTGTR_CharacterState) for the character edited in the panel, or (None, None),
     also when the target isn't in the scene anymore (deleted: the pointer alone keeps it alive)"""
@@ -288,8 +298,9 @@ def register():
     bpy.types.Armature.retargetor_profile = PointerProperty(type=RTGTR_RigProfile, override=OVERRIDABLE)
     bpy.types.Object.retargetor = PointerProperty(type=RTGTR_CharacterState, override=OVERRIDABLE)
     bpy.types.Scene.retargetor_target = PointerProperty(
-        type=bpy.types.Object, name="Target Armature", poll=is_scene_armature,
-        description="Character edited in the Retarget panel. Its setup is stored on the object itself")
+        type=bpy.types.Object, name="Target Armature", poll=is_scene_armature, update=update_target,
+        description="Character edited in the Retarget panel. Its setup is stored on the object itself. An empty "
+                    "rig profile gets the preset matching the armature's bones, if there is one")
 
 
 def unregister():

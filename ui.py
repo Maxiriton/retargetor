@@ -151,6 +151,8 @@ class RETARGETOR_PT_RigProfilePanel(Panel):
         layout.label(text=f"Armature: {armature.name}", icon='ARMATURE_DATA')
         if not armature.is_editable:
             layout.label(text="Linked armature: edit the profile in its library file", icon='LIBRARY_DATA_DIRECT')
+        if profile.source and len(profile.roles) > 0:
+            layout.label(text=f"From the preset '{profile.source}'", icon='PRESET')
 
         row = layout.row(align=True)
         row.operator("retargetor.profile_load_preset", icon='PRESET')
@@ -233,6 +235,7 @@ class RETARGETOR_PT_GeneratePanel(Panel):
             layout.label(text="Choose the character in the Retarget panel")
             return
         layout.label(text=f"Character: {rig.name}", icon='ARMATURE_DATA')
+        draw_profile_status(layout, rig)
         active = context.active_object
         if (active is not None and active != rig and active.type == 'ARMATURE'
                 and active != rig.retargetor.model_armature):
@@ -263,6 +266,21 @@ def _error(layout, text, width=48):
         layout.label(text=line, icon='ERROR' if i == 0 else 'BLANK1')
 
 
+def draw_profile_status(layout, rig):
+    """Where the character's rig profile comes from"""
+    from .profile_operators import detect_preset
+    profile = rig.data.retargetor_profile
+    if len(profile.roles) > 0:
+        source = f"preset '{profile.source}'" if profile.source else "set up by hand"
+        layout.label(text=f"Rig profile: {source}", icon='OUTLINER_DATA_ARMATURE')
+        return
+    detected = detect_preset(rig.data)
+    if detected is not None:
+        layout.label(text=f"Rig profile: preset '{detected[0]}' (detected)", icon='OUTLINER_DATA_ARMATURE')
+    else:
+        _error(layout, "No rig profile: map the bones to the humanoid roles in the Rig Profile panel")
+
+
 def draw_range(context, layout, rig, state, backend):
     """The frames the next generation covers, and why the backend can't generate them ("" if it can)"""
     box = layout.box()
@@ -274,8 +292,11 @@ def draw_range(context, layout, rig, state, backend):
         row.prop(state, "range_duration")
     scene = context.scene
     fps = scene.render.fps / scene.render.fps_base
+    from .profile_operators import detect_preset
+    rig_profile = rig.data.retargetor_profile.to_core()
+    detected = detect_preset(rig.data) if not rig_profile.roles else None
     try:
-        start, end, key_frames = generation.generation_range(rig, rig.data.retargetor_profile.to_core())
+        start, end, key_frames = generation.generation_range(rig, detected[1] if detected else rig_profile)
     except ValueError as e:
         _error(box, str(e))
         return str(e)
