@@ -19,9 +19,12 @@ class Capabilities:
     (None: works at any rate; the backend's adapter resamples to the request's fps either way).
     streaming: sends the motion in several chunks while generating.
     min_key_poses: fewest key poses in a request (0: the prompt alone is enough).
+    partial_poses: honours core.motion.Pose.constrained_joints (constrains only what the animator keyed);
+    otherwise every key pose is sent whole.
     """
     prompt: bool = False
     min_key_poses: int = 2
+    partial_poses: bool = False
     seed: bool = False
     max_duration: float | None = None
     native_fps: float | None = None

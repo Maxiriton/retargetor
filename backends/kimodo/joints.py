@@ -7,6 +7,18 @@ DEFAULT_MODEL = "Kimodo-SOMA-RP-v1.1"
 
 ROOT_JOINT = "Hips"
 
+# Kimodo's end-effector constraints (kimodo.constraints), by constraint type: the joints of a partial pose each
+# one stands for. Hands and feet use their named types: Kimodo's post-processing only places those (a generic
+# "end-effector" one is followed by the diffusion alone). "end-effector" pins the hips. Any other joint keyed
+# (spine, neck, head) needs the whole body.
+END_EFFECTORS = {
+    "end-effector": {"Hips"},
+    "left-hand": {"LeftShoulder", "LeftArm", "LeftForeArm", "LeftHand"},
+    "right-hand": {"RightShoulder", "RightArm", "RightForeArm", "RightHand"},
+    "left-foot": {"LeftLeg", "LeftShin", "LeftFoot", "LeftToeBase"},
+    "right-foot": {"RightLeg", "RightShin", "RightFoot", "RightToeBase"},
+}
+
 # Humanoid role -> SOMA joint (the 77-joint skeleton used in Kimodo's outputs)
 JOINT_MAP = {
     "hips": "Hips",

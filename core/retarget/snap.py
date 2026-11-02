@@ -299,24 +299,29 @@ class Retargeter:
             self._levels = self._dependency_levels(view_layer)
         return self._levels
 
-    def snap_pose(self, view_layer, add_roll=True, add_correction=True, repetitions=1, final_update=True):
+    def snap_pose(self, view_layer, add_roll=True, add_correction=True, repetitions=1, final_update=True,
+                  skip=()):
         """Snap every mapped target bone at the current frame, one dependency level at a time (see
         _dependency_levels): one sweep is exact. repetitions: number of sweeps, only useful for bones that
-        depend on each other. final_update: refresh the scene after the last level (not needed to key)."""
+        depend on each other. final_update: refresh the scene after the last level (not needed to key).
+        skip: target bones left as they are (their children are snapped from where they stand)."""
         levels = self.levels(view_layer)
         for sweep in range(repetitions):
             for index, level in enumerate(levels):
                 for resolved in level:
-                    self._snap(resolved, add_roll=add_roll, add_correction=add_correction)
+                    if resolved.pair.target not in skip:
+                        self._snap(resolved, add_roll=add_roll, add_correction=add_correction)
                 if final_update or sweep < repetitions - 1 or index < len(levels) - 1:
                     view_layer.update()
 
-    def bake(self, scene, view_layer, frames, keytype='KEYFRAME', repetitions=1, previous_rotations=None):
+    def bake(self, scene, view_layer, frames, keytype='KEYFRAME', repetitions=1, previous_rotations=None,
+             skip=None):
         """Snap and key the mapped target bones on each of the given frames (Blender frame numbers).
         Rotations are keyed in each bone's own rotation mode (quaternions with continuous signs); locations only
         on the bones flagged "Use Translation". The current frame is restored at the end. Returns the number of frames baked.
         previous_rotations: {bone name: Quaternion keyed on the previous frame}, to bake in several calls with
-        continuous quaternion signs (pass the same dict to each call)."""
+        continuous quaternion signs (pass the same dict to each call).
+        skip: {frame: target bone names} neither snapped nor keyed on that frame (bones the user keyed there)."""
         frames = sorted(set(int(f) for f in frames))
         keyed = [(r.tgt_pose_bone, r.pair.use_translation, r.rotation_mode == 'QUATERNION') for r in self.order]
         original_frame = scene.frame_current
@@ -326,9 +331,12 @@ class Retargeter:
         try:
             for frame in frames:
                 scene.frame_set(frame)
-                self.snap_pose(view_layer, repetitions=repetitions, final_update=False)
+                skipped = skip.get(frame, ()) if skip else ()
+                self.snap_pose(view_layer, repetitions=repetitions, final_update=False, skip=skipped)
 
                 for bone, use_translation, quaternion in keyed:
+                    if bone.name in skipped:
+                        continue
                     if quaternion:
                         keep_quaternion_continuous(bone, previous_rotations)
                     if use_translation:

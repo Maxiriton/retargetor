@@ -34,22 +34,28 @@ class Pose:
 
     rotations: {joint name: rotation from rest, world space}. A partial pose only lists some joints.
     root_position: world position of the root joint's head, in meters, or None if not constrained.
+    constrained_joints: in a key pose, the joints the animator keyed (a partial pose: a hand alone...), or None
+    for all of them. The rotations still list every joint, so a backend can work out where the keyed ones are.
     """
     rotations: dict[str, Quat] = field(default_factory=dict)
     root_position: Vec3 | None = None
+    constrained_joints: list[str] | None = None
 
     def to_dict(self):
         return {
             "rotations": {name: list(q) for name, q in self.rotations.items()},
             "root_position": list(self.root_position) if self.root_position is not None else None,
+            "constrained_joints": list(self.constrained_joints) if self.constrained_joints is not None else None,
         }
 
     @classmethod
     def from_dict(cls, data):
         root = data.get("root_position")
+        constrained = data.get("constrained_joints")
         return cls(
             rotations={name: _quat(q, f"The rotation of '{name}'") for name, q in data.get("rotations", {}).items()},
             root_position=_vec3(root, "The root position") if root is not None else None,
+            constrained_joints=[str(name) for name in constrained] if constrained is not None else None,
         )
 
 

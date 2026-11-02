@@ -250,13 +250,33 @@ def main():
     checks.check(user_keys(after_keys) == user_keys(keys_before), "user keys untouched by the regeneration")
     frames = after_keys[('pose.bones["upper_arm_fk.L"].rotation_quaternion', 0)]
     generated = {f for f, (_v, t) in frames.items() if t == 'GENERATED'}
-    checks.check(generated == expected - {90}, "GENERATED keys replaced, none on the new key pose")
-    checks.check(len(frames) == 119, f"no duplicate keys ({len(frames)} keys on upper_arm_fk.L)")
+    # Frame 90 keys the head alone: the other controls are written there, the head isn't
+    checks.check(generated == expected, "GENERATED keys replaced, the other controls written on frame 90")
+    checks.check(key_type(rig, generation, 'pose.bones["head"].rotation_quaternion', 0, 90) == 'KEYFRAME',
+                 "the head keeps its user key on frame 90")
+    checks.check(len(frames) == 120, f"no duplicate keys ({len(frames)} keys on upper_arm_fk.L)")
+    checks.check(task.request.key_poses[90].constrained_joints is None, "the interpolation backend gets whole poses")
     # 117 generated frames on 18 quaternion controls, 2 Euler shoulders and the torso location, minus the
     # 4 keys retyped on frame 90
     checks.check(task.result[1] == 117 * (18 * 4 + 2 * 3 + 3) - 4, f"{task.result[1]} old GENERATED keys removed")
     scene.frame_set(90)
     checks.close(head.rotation_quaternion.w, 0.9, 1e-6, "the new user key keeps its value")
+
+    # A backend taking partial poses gets the joints keyed on frame 90 only (the head); whole key poses elsewhere
+    import dataclasses
+    from retargetor.backends.registry import get
+    backend = get("interpolate")
+    capabilities = backend.capabilities
+    backend.capabilities = dataclasses.replace(capabilities, partial_poses=True)
+    try:
+        task = generation.GenerationTask()
+        checks.check(task.run(bpy.context, rig), "generation with partial poses")
+        poses = task.request.key_poses
+        checks.check(poses[90].constrained_joints == ["head"] and len(poses[90].rotations) == 23,
+                     f"frame 90 constrains the head, and lists every joint ({poses[90].constrained_joints})")
+        checks.check(all(poses[f].constrained_joints is None for f in (1, 61, 120)), "the other key poses are whole")
+    finally:
+        backend.capabilities = capabilities
 
     # 2a. Edits like the Graph Editor's: a value changed, then put back (a cancelled drag); a key moved in time.
     # fcurve.update() may move the keys in memory: they are looked up again after each one
@@ -313,7 +333,7 @@ def main():
     checks.check(user_keys(after_keys) == user_keys(keys_before), "user keys untouched by the custom range")
     frames = after_keys[('pose.bones["upper_arm_fk.L"].rotation_quaternion', 0)]
     generated = {f for f, (_v, t) in frames.items() if t == 'GENERATED'}
-    checks.check(generated == set(range(1, 151)) - {1, 61, 90, 120}, "GENERATED keys up to frame 150")
+    checks.check(generated == set(range(1, 151)) - {1, 61, 120}, "GENERATED keys up to frame 150")
     held = snapshot(rig, END_BONES, [120])[120]
     angle, dist = worst_change(rig, {150: held})
     checks.below(angle, 1e-3, "frame 150 holds the last key pose (deg)")
@@ -341,8 +361,12 @@ def main():
     ik_pose = snapshot(rig, arm, key_frames)
     checks.check(run_operator() == {'FINISHED'}, "generated with an arm in IK")
     checks.check(switch["IK_FK"] == 1.0, "the arm is switched to FK")
-    angle, _dist = worst_change(rig, ik_pose)
-    checks.below(angle, 0.01, "the arm keeps its IK pose on the key poses, worst direction (deg)")
+    # Frame 90 keys the head alone: the body is generated there (the interpolation goes through the pose read
+    # there, within 0.02 degrees after the round trip through the spine's read-only roles)
+    angle, _dist = worst_change(rig, {f: bones for f, bones in ik_pose.items() if f != 90})
+    checks.below(angle, 0.01, "the arm keeps its IK pose on the whole key poses, worst direction (deg)")
+    angle, _dist = worst_change(rig, {90: ik_pose[90]})
+    checks.below(angle, 0.05, "the arm keeps its IK pose on frame 90, where the body is generated (deg)")
     # The IK hand stays at rest while the character walks away: Rigify's IK stretches the arm (by a metre), which
     # the FK chain doesn't. Only the shoulder joint keeps its place; tests/blender/test_generate_ik.py checks a
     # real IK pose.

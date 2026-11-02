@@ -225,8 +225,25 @@ def canonical_from(rotations, roots, layout):
     return Canonical(origin=origin, rotation=rotation_y(-angle))
 
 
-def request_to_constraints(request, layout, model_fps):
+def end_effectors(constrained_joints, effectors):
+    """Kimodo's end-effector constraint types standing for a partial pose's joints, sorted, or None if the whole
+    body must be constrained (all joints, none, or a joint no end-effector covers). effectors: {constraint type:
+    set of joints} (joints.END_EFFECTORS)."""
+    if not constrained_joints:
+        return None
+    types = set()
+    for joint in constrained_joints:
+        kind = next((k for k, chain in effectors.items() if joint in chain), None)
+        if kind is None:
+            return None
+        types.add(kind)
+    return sorted(types)
+
+
+def request_to_constraints(request, layout, model_fps, effectors=None):
     """Kimodo's inputs for a GenerationRequest.
+    effectors: {end-effector name: joints} (joints.END_EFFECTORS): partial key poses become end-effector
+    constraints; without it every key pose constrains the whole body.
     The canonical frame comes from the request's origin (the character on the first frame), or from the first
     key pose without one. Returns (constraints list for kimodo.constraints.load_constraints_lst, Canonical,
     Timing). Without key poses, the constraints list is empty (prompt only).
@@ -251,12 +268,25 @@ def request_to_constraints(request, layout, model_fps):
         q = rotations[:, j] if parent < 0 else quat.multiply(quat.conjugate(rotations[:, parent]), rotations[:, j])
         local.append(quat.to_axis_angle(q))
     local = np.stack(local, axis=1)  # (keys, 30, 3)
-    constraints = [{
-        "type": "fullbody",
-        "frame_indices": timing.key_indices,
-        "local_joints_rot": local.tolist(),
-        "root_positions": roots.tolist(),
-    }]
+    # Key poses grouped by constraint type: the whole body, or each end-effector they key (a pose keying both
+    # hands is in both hand constraints)
+    groups = {}
+    for k, frame in enumerate(frames):
+        pose = request.key_poses[frame]
+        kinds = end_effectors(pose.constrained_joints, effectors) if effectors else None
+        for kind in kinds or ["fullbody"]:
+            groups.setdefault(kind, []).append(k)
+    constraints = []
+    for kind, ks in sorted(groups.items(), key=lambda item: (item[0] != "fullbody", item[0])):
+        constraint = {
+            "type": kind,
+            "frame_indices": [timing.key_indices[k] for k in ks],
+            "local_joints_rot": local[ks].tolist(),
+            "root_positions": roots[ks].tolist(),
+        }
+        if kind == "end-effector":
+            constraint["joint_names"] = [layout.root]
+        constraints.append(constraint)
     return constraints, canonical, timing
 
 

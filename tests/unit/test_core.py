@@ -124,7 +124,7 @@ class TestProfile(unittest.TestCase):
 
 class TestMotion(unittest.TestCase):
     def test_round_trip(self):
-        pose = motion.Pose({"a": (1.0, 0.0, 0.0, 0.0)}, (0.0, 1.0, 0.9))
+        pose = motion.Pose({"a": (1.0, 0.0, 0.0, 0.0)}, (0.0, 1.0, 0.9), constrained_joints=["a"])
         request = motion.GenerationRequest(1, 120, 30.0, {1: pose, 61: motion.Pose({"a": (0.0, 1.0, 0.0, 0.0)})},
                                            prompt="walk", seed=1, origin=pose)
         again = motion.GenerationRequest.from_dict(json.loads(json.dumps(request.to_dict())))

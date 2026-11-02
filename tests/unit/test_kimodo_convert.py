@@ -152,6 +152,28 @@ class TestCanonical(unittest.TestCase):
             self.assertLess(np.max(1.0 - np.abs(np.sum(rot_b[frame - 1] * expected, -1))), 1e-12)
 
 
+    def test_partial_poses(self):
+        """Key poses keying a hand alone become end-effector constraints; whole ones, or keying the spine, the
+        whole body"""
+        layout = small_layout()
+        effectors = {"end-effector": {"Hips"}, "right-foot": {"RightLeg", "RightShin"}}
+        self.assertIsNone(convert.end_effectors(None, effectors))
+        self.assertEqual(convert.end_effectors(["RightShin", "RightLeg"], effectors), ["right-foot"])
+        self.assertEqual(convert.end_effectors(["Hips", "RightShin"], effectors), ["end-effector", "right-foot"])
+        self.assertIsNone(convert.end_effectors(["Spine1", "RightShin"], effectors))
+        request = make_request(frames=(1, 31, 61, 91))
+        request.key_poses[31].constrained_joints = ["RightShin"]
+        request.key_poses[61].constrained_joints = ["Spine1"]
+        request.key_poses[91].constrained_joints = ["RightLeg", "Hips"]
+        constraints, _canonical, timing = convert.request_to_constraints(request, layout, 30.0, effectors)
+        self.assertEqual([(c["type"], c["frame_indices"], c.get("joint_names")) for c in constraints],
+                         [("fullbody", [0, 60], None), ("end-effector", [90], ["Hips"]),
+                          ("right-foot", [30, 90], None)])
+        _full, _hips, partial = constraints
+        reference, _c, _t = convert.request_to_constraints(request, layout, 30.0)
+        self.assertEqual(len(reference), 1)  # without effectors, every key pose is whole
+        np.testing.assert_allclose(partial["root_positions"], np.array(reference[0]["root_positions"])[[1, 3]])
+
     def test_origin_places_the_motion(self):
         """Without key pose, the canonical frame comes from the origin: the character's place and heading"""
         layout = small_layout()

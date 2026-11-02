@@ -1,7 +1,7 @@
 """Generate In-betweens with Kimodo (needs the Kimodo venv and a CUDA GPU), on the Phase 1 Rigify rig.
 
     blender -b --factory-startup <rig_keyposes.blend> --python tests/blender/test_generate_kimodo.py --
-        <base|heading|fps24|range|ik> <kimodo python> <out dir> [<spike rig_result.json dump>]
+        <base|heading|fps24|range|ik|partial> <kimodo python> <out dir> [<spike rig_result.json dump>]
 
 base:    key poses on frames 1, 61, 120 at 30 fps, prompt and seed of the Phase 1 spike. Writes the rig's motion
          to <out dir>/base.json. Compared with the spike's result if its dump is given (tests/run_tests.py
@@ -12,6 +12,8 @@ fps24:   the scene at 24 fps, key poses moved to the same times (frames 1, 49, 9
          the base result at the same times.
 ik:      on rig_keyposes_ik.blend (the same key poses made with the IK controls only, every limb in IK): the
          FK controls are snapped to the IK pose automatically; the result must be close to the base one.
+partial: after the base generation, the left arm raised and keyed alone on frame 90 (over the generated keys,
+         as an animator would): a partial key pose, Kimodo's left hand end-effector.
 range:   custom ranges: the prompt alone (no key pose, the character turned 90 degrees), starting from one key
          pose, ending on one key pose.
 """
@@ -352,6 +354,63 @@ def run_ik(checks, kimodo_python, out_dir):
     checks.below(mean_a, 5.0, "IK limbs: close to the base result, mean direction (deg)")
 
 
+def arm_key_values(rig, frame=90):
+    from retargetor import generation
+    bag = generation.channelbag(rig)
+    values = {}
+    for name in ("upper_arm_fk.L", "forearm_fk.L", "hand_fk.L"):
+        for index in range(4):
+            fcurve = bag.fcurves.find(f'pose.bones["{name}"].rotation_quaternion', index=index)
+            values[(name, index)] = next((p.co.y, p.type) for p in fcurve.keyframe_points if round(p.co.x) == frame)
+    return values
+
+
+def run_partial(checks, kimodo_python):
+    rig = setup(kimodo_python)
+    scene = bpy.context.scene
+    generate(checks, "partial, base generation (starts Kimodo)")
+    # Raise the left arm on frame 90, bend the elbow and the wrist a little, and key the arm's FK controls there
+    scene.frame_set(90)
+    for name, degrees in (("upper_arm_fk.L", -70.0), ("forearm_fk.L", 20.0), ("hand_fk.L", 10.0)):
+        bone = rig.pose.bones[name]
+        bone.rotation_quaternion = bone.rotation_quaternion @ Matrix.Rotation(math.radians(degrees), 4, 'X').to_quaternion()
+    bpy.context.view_layer.update()
+    for name in ("upper_arm_fk.L", "forearm_fk.L", "hand_fk.L"):
+        rig.pose.bones[name].keyframe_insert("rotation_quaternion", frame=90)
+    bpy.context.view_layer.update()  # the add-on retypes the keys made over generated ones
+    from retargetor import generation
+    bag = generation.channelbag(rig)
+    fcurve = bag.fcurves.find('pose.bones["forearm_fk.L"].rotation_quaternion', index=0)
+    checks.check(next(p.type for p in fcurve.keyframe_points if round(p.co.x) == 90) == 'KEYFRAME',
+                 "the arm keyed over generated keys: user keys")
+    arm_keys = arm_key_values(rig)
+    hand_target = (rig.matrix_world @ rig.pose.bones["ORG-hand.L"].head).copy()
+    hand_direction = bone_direction(rig, "ORG-hand.L")
+
+    task = generate(checks, "partial pose: the left arm alone on frame 90")
+    pose = task.request.key_poses[90]
+    checks.check(pose.constrained_joints == ["LeftArm", "LeftForeArm", "LeftHand"],
+                 f"frame 90 constrains the left arm ({pose.constrained_joints})")
+    checks.check(all(task.request.key_poses[f].constrained_joints is None for f in (1, 61, 120)),
+                 "the other key poses are whole")
+    checks.check(90 in generated_frames(rig, "upper_arm_fk.R") and 90 not in generated_frames(rig, "upper_arm_fk.L"),
+                 "frame 90: the rest of the body generated, the keyed arm kept")
+    check_follows_model(checks, rig, [f for f in range(1, 121) if f != 90], "partial")
+    scene.frame_set(90)
+    rig_hand = rig.matrix_world @ rig.pose.bones["ORG-hand.L"].head
+    model = rig.retargetor.model_armature
+    model_hand = model.matrix_world @ model.pose.bones["LeftHand"].head
+    print(f"FINDING partial pose: on frame 90 the rig's left hand is {(rig_hand - hand_target).length * 100:.1f} cm "
+          f"from the key pose ({angle_deg(bone_direction(rig, 'ORG-hand.L'), hand_direction):.1f} deg); the model's "
+          f"hand is {(model_hand - hand_target).length * 100:.1f} cm from it (other proportions)")
+    # Kimodo puts its hand exactly where the key pose has it (checked in the Kimodo venv: 0.0001 cm), and builds
+    # the rest of the body freely. The rig keeps the arm's FK keys (local rotations) on that new body: its hand
+    # lands elsewhere. Measured, not checked (see ROADMAP.md, Phase 4 findings).
+    print(f"FINDING partial pose: the rig's left hand moves {jump_cm(rig, 89, 90, 'ORG-hand.L'):.1f} cm from frame 89 "
+          "to frame 90")
+    checks.check(arm_key_values(rig) == arm_keys, "partial: the arm's keys on frame 90 are untouched")
+
+
 def main():
     args = bootstrap.script_args()
     mode, kimodo_python, out_dir = args[0], args[1], args[2]
@@ -368,6 +427,8 @@ def main():
             run_range(checks, kimodo_python)
         elif mode == "ik":
             run_ik(checks, kimodo_python, out_dir)
+        elif mode == "partial":
+            run_partial(checks, kimodo_python)
     finally:
         from retargetor.backends import registry
         registry.stop_all()

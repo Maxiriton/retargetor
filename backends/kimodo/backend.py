@@ -23,7 +23,7 @@ class KimodoBackend(Backend):
     label = "Kimodo"
     description = "NVIDIA Kimodo, SOMA skeleton: text prompt and full-body key poses (needs a CUDA GPU)"
     capabilities = Capabilities(prompt=True, seed=True, max_duration=joints.MAX_DURATION,
-                                native_fps=joints.MODEL_FPS, min_key_poses=0)
+                                native_fps=joints.MODEL_FPS, min_key_poses=0, partial_poses=True)
     joint_map = dict(joints.JOINT_MAP)
 
     def settings_class(self):

@@ -126,6 +126,33 @@ def snap_limbs_to_fk(context, rig, by_frame, in_ik, start, end):
     set_limbs_fk(rig, in_ik, view_layer, frames=sorted(set(by_frame) | {start, end}))
 
 
+def user_keys_by_bone(rig, bones):
+    """{bone: set of frames where it has a user key}"""
+    return {bone: set(user_key_frames(rig, [bone])) for bone in bones}
+
+
+def keyed_roles(rig, rig_profile, frames):
+    """{frame: ids of the roles the user keyed there}: a role is keyed when its write control has a user key on
+    the frame, or an IK control of the limb it belongs to (a limb owns the roles written to its FK controls)."""
+    write = {b.role: b.write_bone for b in rig_profile.roles if b.write_bone}
+    keys = user_keys_by_bone(rig, set(write.values()) | {n for limb in rig_profile.limbs for n in limb.ik_controls})
+    result = {}
+    for frame in frames:
+        keyed = {role for role, bone in write.items() if frame in keys[bone]}
+        for limb in rig_profile.limbs:
+            if any(frame in keys[name] for name in limb.ik_controls):
+                fk = {pair.fk_control for pair in limb.controls}
+                keyed |= {role for role, bone in write.items() if bone in fk}
+        result[frame] = keyed
+    return result
+
+
+def limb_keyed(limb, rig_profile, keyed):
+    """Whether a role of the limb is in the set of keyed roles"""
+    fk = {pair.fk_control for pair in limb.controls}
+    return any(b.role in keyed for b in rig_profile.roles if b.write_bone in fk)
+
+
 def find_key_frames(rig, rig_profile):
     """The key poses: frames where a write control of the profile, or an IK control of one of its limbs, has a
     user key (sorted, maybe empty). Raises ValueError if the profile has no control to write."""
@@ -272,9 +299,11 @@ def place_model(model, rig, view_layer):
 
 ### Request and result
 
-def build_request(context, rig, model, backend, rig_profile, start, end, key_frames, prompt="", seed=None):
+def build_request(context, rig, model, backend, rig_profile, start, end, key_frames, prompt="", seed=None,
+                  keyed=None):
     """Snap the model to the rig on each key frame, and on the start frame (the request's origin), and read
-    its poses. Returns (GenerationRequest, translation scale rig -> model, retargeting errors)."""
+    its poses. keyed: {frame: ids of the roles keyed there}, for a backend taking partial poses (None: every
+    key pose is whole). Returns (GenerationRequest, translation scale rig -> model, retargeting errors)."""
     scene, view_layer = context.scene, context.view_layer
     skeleton = armature_skeleton(model)
     pairs = core_profile.compose(rig_profile, backend.joint_map, core_profile.TO_MODEL)
@@ -297,6 +326,12 @@ def build_request(context, rig, model, backend, rig_profile, start, end, key_fra
         scene.frame_set(original_frame)
 
     caps = backend.capabilities
+    if keyed is not None and caps.partial_poses:
+        written = {b.role for b in rig_profile.roles if b.write_bone and b.role in backend.joint_map}
+        for frame in key_frames:
+            if not written <= keyed[frame]:
+                poses[frame].constrained_joints = sorted(backend.joint_map[role] for role in keyed[frame]
+                                                         if role in backend.joint_map)
     request = GenerationRequest(start, end, scene.render.fps / scene.render.fps_base,
                                 {frame: poses[frame] for frame in key_frames},
                                 prompt=prompt if caps.prompt else "", seed=seed if caps.seed else None,
@@ -308,8 +343,9 @@ def build_request(context, rig, model, backend, rig_profile, start, end, key_fra
 class MotionWriter:
     """Writes a motion onto the rig in several steps, so Blender stays responsive (about 22 ms per frame on
     Rigify, all of it in the rig's evaluation). The motion goes on the model's armature first, then is baked onto
-    the rig's write controls as GENERATED keys, from start to end. Frames carrying a user key are never written;
-    the GENERATED keys already in the range are removed when the writer is made.
+    the rig's write controls as GENERATED keys, from start to end. A control is never written on a frame where it
+    has a user key (the other controls of that frame are, a partial key pose); the GENERATED keys already in the
+    range are removed when the writer is made.
     step() until it returns True; then `frames`, `removed` and `errors` hold the result."""
 
     def __init__(self, context, rig, model, backend, rig_profile, motion, start, end, translation_scale):
@@ -327,8 +363,14 @@ class MotionWriter:
         self.rig = rig
         self.controls = [resolved.pair.target for resolved in self.retargeter.order]
         self.removed = remove_generated_keys(rig, self.controls, start, end)
-        user_frames = set(user_key_frames(rig, self.controls))
-        self.frames = [frame for frame in range(start, end + 1) if frame not in user_frames]
+        # The bones the user keyed are left alone on their frames; the rest of those frames is written
+        user_keys = user_keys_by_bone(rig, self.controls)
+        self.skip = {}
+        for bone, frames in user_keys.items():
+            for frame in frames:
+                self.skip.setdefault(frame, set()).add(bone)
+        self.frames = [frame for frame in range(start, end + 1)
+                       if len(self.skip.get(frame, ())) < len(self.controls)]
         self.done = 0
         self._previous_rotations = {}
         self._chunk = 2  # frames per step, adjusted to the time budget after each step
@@ -351,7 +393,7 @@ class MotionWriter:
             chunk = self.frames[self.done:self.done + self._chunk]
             begin = time.perf_counter()
             self.retargeter.bake(context.scene, context.view_layer, chunk, keytype=GENERATED,
-                                 previous_rotations=self._previous_rotations)
+                                 previous_rotations=self._previous_rotations, skip=self.skip)
             per_frame = (time.perf_counter() - begin) / len(chunk)
             self._chunk = max(1, min(100, int(budget / max(per_frame, 1e-4))))
             self.done += len(chunk)
@@ -396,6 +438,8 @@ class GenerationTask:
         self.result = None  # (frames written, keys removed) once finished
         self.notes = []  # what was done to the rig besides the generated keys (FK snap...)
         self.writer = None
+        self.request = None  # the GenerationRequest sent
+        self.partial = False
         self.cancel_requested = False
         # The rig was changed before the backend answered (FK snap...): a cancelled generation keeps it
         self.modified = False
@@ -449,6 +493,13 @@ class GenerationTask:
         if problem:
             raise ValueError(problem)
         snaps, in_ik = limbs_in_ik(rig, self.rig_profile, self.start_frame, self.end_frame, self.key_frames)
+        self.partial = self.backend.capabilities.partial_poses
+        if self.partial:
+            # A partial key pose constrains what was keyed: limbs not keyed there aren't snapped (nor constrained)
+            keyed = keyed_roles(rig, self.rig_profile, self.key_frames)
+            snaps = {frame: [limb for limb in limbs if limb_keyed(limb, self.rig_profile, keyed[frame])]
+                     for frame, limbs in snaps.items()}
+            snaps = {frame: limbs for frame, limbs in snaps.items() if limbs}
         self.worker = registry.worker_for(self.backend, backend_settings(context, self.backend))
         if in_ik:
             # Before anything else changes the rig: the generated motion is written to the FK controls
@@ -486,9 +537,11 @@ class GenerationTask:
     def _send_request(self, context, rig, model):
         state = rig.retargetor
         start = time.perf_counter()
+        keyed = keyed_roles(rig, self.rig_profile, self.key_frames) if self.partial else None
         request, self.translation_scale, errors = build_request(
             context, rig, model, self.backend, self.rig_profile, self.start_frame, self.end_frame, self.key_frames,
-            state.prompt, state.seed)
+            state.prompt, state.seed, keyed)
+        self.request = request
         self.timings["key poses"] = time.perf_counter() - start
         self.errors |= errors
         self.stage = GENERATING

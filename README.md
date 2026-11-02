@@ -142,6 +142,8 @@ The model generates the motion from your first key pose to your last one. The re
 - start from **one key pose**, or end on one: the motion starts where the character stands on the start frame, so to walk up to a key pose, place the root where the walk starts;
 - **extend** an animation past its last key pose.
 
+**Partial poses**: a frame where you keyed only some controls (an arm, a foot...) is a partial key pose. With Kimodo it pins only what you keyed: a hand or a foot where your pose puts it (and the hips, which Kimodo always pins on a constrained frame); keying the spine, the neck or the head pins the whole body. The rest of that frame is generated, and your keys stay as they are. Since your keys are FK rotations, the keyed limb follows the generated body on that frame: if the body moves a lot there, the hand or foot lands away from where you posed it. Key the body as well to keep the whole pose.
+
 Kimodo needs no key pose and generates up to 10 s; the panel says when the range is too long, or has fewer key poses than the backend needs (the interpolation test backend needs two). Frames carrying one of your keys are never written. Generating again replaces the Generated keys of the range and keeps yours. The whole generation is one undo step.
 
 - The first generation starts the model (about 20 s with Kimodo); the model then stays loaded, and the next ones take about 3 s plus the time to write the keys (about 3 s for 120 frames). **Start** / **Stop** in the panel load the model ahead of time, or free its memory.

@@ -66,7 +66,8 @@ class KimodoHandler:
         from kimodo.constraints import load_constraints_lst
         from kimodo.tools import seed_everything
 
-        constraints, canonical, timing = convert.request_to_constraints(request, layout, joints.MODEL_FPS)
+        constraints, canonical, timing = convert.request_to_constraints(request, layout, joints.MODEL_FPS,
+                                                                        joints.END_EFFECTORS)
         num_frames = timing.count
         if request.seed is not None:
             seed_everything(int(request.seed))
