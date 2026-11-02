@@ -141,13 +141,13 @@ Order set after the first test on the user's own Rigify character (2026-11-02): 
 - [ ] IK/FK limbs, Rigify: when a limb is posed in IK, snap its FK controls to the IK pose on the key frames automatically, then work in FK only (tested in Phase 1: exact), instead of refusing as in Phase 3. The snap is already described in the rig profile. After generation the limbs play in FK; revisit with usage.
 - [ ] Detect a Rigify rig and apply the Rigify preset automatically, so a Rigify character needs no profile setup.
 - [ ] Retype edited `GENERATED` keys as user keys before regenerating (Blender keeps the `GENERATED` type when a key is replaced: see the Phase 3 findings).
-- [ ] Regenerate a single segment between two keys.
 - [ ] Partial poses: constrain only the keyed controls (end-effectors).
-- [ ] Test the jumps around key poses; blend if needed.
 
 ### Phase 5: user experience and release
 
 - [ ] Prompt segments, visible in the timeline.
+- [ ] Regenerate a single segment (between two key poses, or one prompt segment) without touching the rest.
+- [ ] Transitions between segments (where two generations meet).
 - [ ] Root path drawing (when the backend supports it).
 - [ ] Ghost preview of the model's skeleton (nice-to-have).
 - [ ] Clear error messages, progress and cancel (a first version is in Phase 3).
@@ -181,6 +181,7 @@ Order set after the first test on the user's own Rigify character (2026-11-02): 
 | 2026-11-02 | The model's armature follows the rig object's placement (not its scale); its poses are read and written in its own armature space, so the motion is generated in the character's space. |
 | 2026-11-02 | A generation may use 0 or 1 key pose with a custom range (start, duration), when the backend allows it; without a key pose the motion starts from the character's current position and heading. The custom range prepares the prompt segments of Phase 5. |
 | 2026-11-02 | Phase 4 order, after the first test on the user's own Rigify character: progress and chunked writing, fewer than two key poses, automatic IK → FK snap, automatic Rigify preset, retyping edited generated keys, then the rest. |
+| 2026-11-02 | The continuity of the motion around key poses is left to the backend (Kimodo's post-processing hits them exactly); it is not measured or blended. Regenerating a single segment and the transitions between segments move to Phase 5, with the prompt segments. |
 | 2026-11-02 | Kimodo: key poses are moved to Kimodo's canonical frame (origin and heading of the first one, as Kimodo computes it) and the result moved back; `first_heading_angle` is not used. Key frames go to the nearest model frame, the time between key poses is stretched so each lands exactly, and the result is resampled to the scene's rate. |
 
 ## Open questions

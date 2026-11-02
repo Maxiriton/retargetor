@@ -55,9 +55,10 @@ The animation itself is the source of truth: key poses are not stored in a separ
 - Blender has no "key edited" event. A likely approach: remember the values written at generation time; before regenerating, any `GENERATED` key whose value changed is retyped as a user key. To be checked in Phase 4.
 - Keying over an existing `GENERATED` key keeps it `GENERATED` (Blender keeps the type of a replaced key, even with `keytype='KEYFRAME'`): checked in Phase 3, so the retyping above is needed.
 
-## To test later
+## Continuity around key poses
 
-- Small jumps right before or after a key pose, since the model does not hit the poses exactly. Blending over a few frames around each pose is an option, to decide after testing.
+- Left to the backend: Kimodo's post-processing hits the key poses exactly (checked in Phase 3). The add-on does not measure or blend the motion around them.
+- Where two generations meet (regenerating one segment, prompt segments) is a Phase 5 topic.
 
 ## Characters
 
