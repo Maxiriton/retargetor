@@ -83,9 +83,34 @@ def keep_quaternion_continuous(pose_bone, previous_rotations):
     previous_rotations[pose_bone.name] = q
 
 
+def rotation_data_path(pose_bone):
+    """The rotation property used by the bone's rotation mode"""
+    if pose_bone.rotation_mode == 'QUATERNION':
+        return "rotation_quaternion"
+    if pose_bone.rotation_mode == 'AXIS_ANGLE':
+        return "rotation_axis_angle"
+    return "rotation_euler"
+
+
+def set_rotation(pose_bone, rotation_mode, q):
+    """Give the bone the rotation q (a Quaternion) in its own rotation mode. Euler angles stay close to the
+    bone's current ones, so keys made frame after frame don't jump by 360 degrees."""
+    if rotation_mode == 'QUATERNION':
+        pose_bone.rotation_mode = 'QUATERNION'
+        pose_bone.rotation_quaternion = q
+        return
+    previous = pose_bone.rotation_euler.copy()
+    pose_bone.rotation_mode = rotation_mode
+    if rotation_mode == 'AXIS_ANGLE':
+        axis, angle = q.to_axis_angle()
+        pose_bone.rotation_axis_angle = (angle, axis.x, axis.y, axis.z)
+    else:
+        pose_bone.rotation_euler = q.to_euler(rotation_mode, previous)
+
+
 class _ResolvedPair:
     """A BonePair with its pose bones and rest offsets looked up once."""
-    __slots__ = ("pair", "src_pose_bone", "tgt_pose_bone", "roll", "rest_offset", "correction")
+    __slots__ = ("pair", "src_pose_bone", "tgt_pose_bone", "roll", "rest_offset", "correction", "rotation_mode")
 
     def __init__(self, source_obj, target_obj, pair):
         self.pair = pair
@@ -97,6 +122,8 @@ class _ResolvedPair:
             raise KeyError(f"The target bone '{pair.target}' does not exist in the armature '{target_obj.name}'.")
         self.roll, self.rest_offset = rest_offsets(source_obj, target_obj, pair.source, pair.target)
         self.correction = Quaternion(pair.correction) if pair.correction is not None else None
+        # The target keeps its rotation mode (Rigify's shoulders are in Euler, for example)
+        self.rotation_mode = self.tgt_pose_bone.rotation_mode
 
 
 class Retargeter:
@@ -170,6 +197,7 @@ class Retargeter:
         if pair.use_translation:
             location = self._scaled_target_location(resolved)
 
+        previous_euler = tgt_pose_bone.rotation_euler.copy()
         tgt_pose_bone.rotation_mode = 'QUATERNION'
         tgt_pose_bone.matrix = Matrix.LocRotScale(location, rotation, None)
 
@@ -184,7 +212,8 @@ class Retargeter:
         if add_correction and resolved.correction is not None:
             q_rot = q_rot @ resolved.correction
 
-        tgt_pose_bone.rotation_quaternion = q_rot
+        tgt_pose_bone.rotation_euler = previous_euler
+        set_rotation(tgt_pose_bone, resolved.rotation_mode, q_rot)
 
         # Only the bones flagged "Use Translation" keep the copied translation
         if not pair.use_translation:
@@ -208,10 +237,10 @@ class Retargeter:
 
     def bake(self, scene, view_layer, frames, keytype='KEYFRAME', repetitions=5):
         """Snap and key the mapped target bones on each of the given frames (Blender frame numbers).
-        Rotations are keyed as quaternions with continuous signs; locations only on the bones flagged
-        "Use Translation". The current frame is restored at the end. Returns the number of frames baked."""
+        Rotations are keyed in each bone's own rotation mode (quaternions with continuous signs); locations only
+        on the bones flagged "Use Translation". The current frame is restored at the end. Returns the number of frames baked."""
         frames = sorted(set(int(f) for f in frames))
-        keyed = [(r.tgt_pose_bone, r.pair.use_translation) for r in self.order]
+        keyed = [(r.tgt_pose_bone, r.pair.use_translation, r.rotation_mode == 'QUATERNION') for r in self.order]
         original_frame = scene.frame_current
         previous_rotations = {}  # {bone name: Quaternion keyed on the previous frame}
 
@@ -220,11 +249,12 @@ class Retargeter:
                 scene.frame_set(frame)
                 self.snap_pose(view_layer, repetitions=repetitions)
 
-                for bone, use_translation in keyed:
-                    keep_quaternion_continuous(bone, previous_rotations)
+                for bone, use_translation, quaternion in keyed:
+                    if quaternion:
+                        keep_quaternion_continuous(bone, previous_rotations)
                     if use_translation:
                         bone.keyframe_insert(data_path="location", frame=frame, keytype=keytype)
-                    bone.keyframe_insert(data_path="rotation_quaternion", frame=frame, keytype=keytype)
+                    bone.keyframe_insert(data_path=rotation_data_path(bone), frame=frame, keytype=keytype)
         finally:
             scene.frame_set(original_frame)
 
