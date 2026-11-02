@@ -57,7 +57,7 @@ def run_unit_tests(python):
     return result.returncode == 0
 
 
-def run_kimodo_tests(args, env, scratch, rig_file):
+def run_kimodo_tests(args, env, scratch, rig_file, ik_rig_file):
     """Kimodo: conversions against Kimodo itself (no GPU), then generations on the Phase 1 rig (GPU)"""
     results = {}
     command = [args.kimodo_python, "-I", os.path.join(REPO, "tests", "kimodo", "test_kimodo_reference.py")]
@@ -76,9 +76,10 @@ def run_kimodo_tests(args, env, scratch, rig_file):
         run_blender(args.blender, "dump_pose.py", ["rig", dump, "1", "120"], blend=spike_result)
         base_args.append(dump)
     results["kimodo_base"] = run_blender(args.blender, "test_generate_kimodo.py", base_args, blend=rig_file, env=env)
-    for mode in ("heading", "fps24", "range"):
+    for mode in ("heading", "fps24", "range", "ik"):
         results[f"kimodo_{mode}"] = run_blender(args.blender, "test_generate_kimodo.py",
-                                                [mode, args.kimodo_python, out_dir], blend=rig_file, env=env)
+                                                [mode, args.kimodo_python, out_dir],
+                                                blend=ik_rig_file if mode == "ik" else rig_file, env=env)
     return results
 
 
@@ -117,6 +118,12 @@ def main():
         test_rig = os.path.join(rig_dir, "rig_keyposes.blend")
         if os.path.exists(test_rig):
             results["generate"] = run_blender(args.blender, "test_generate.py", blend=test_rig, env=env)
+            # The same key poses made with the IK controls only
+            run_blender(args.blender, os.path.join(REPO, "spikes", "phase1", "make_rig_ik.py"),
+                        [rig_dir, "1", "61", "120"], blend=test_rig)
+            ik_rig = os.path.join(rig_dir, "rig_keyposes_ik.blend")
+            results["generate_ik"] = (os.path.exists(ik_rig)
+                                      and run_blender(args.blender, "test_generate_ik.py", blend=ik_rig, env=env))
         else:
             print("generate: the test rig could not be made (spikes/phase1/make_rig.py)")
             results["generate"] = False
@@ -149,7 +156,8 @@ def main():
                                                    blend=os.path.join(phase1, rig_file), env=env)
 
         if args.kimodo_python and os.path.exists(test_rig):
-            results.update(run_kimodo_tests(args, env, scratch, test_rig))
+            results.update(run_kimodo_tests(args, env, scratch, test_rig,
+                                            os.path.join(rig_dir, "rig_keyposes_ik.blend")))
 
     print("\nSummary:")
     for name, ok in results.items():

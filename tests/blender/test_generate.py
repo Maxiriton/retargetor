@@ -257,21 +257,52 @@ def main():
     checks.check("at most 10 s" in get("kimodo").range_problem(1, 301, 30.0, 0), "Kimodo: 10 s at most")
     state.range_mode = 'KEY_POSES'
 
-    # 3. A limb in IK is refused
+    # 3. An arm in IK (its IK controls at rest): its FK controls are snapped to the IK pose on the key poses,
+    # then it is switched to FK (the switch isn't animated: set once)
     switch = rig.pose.bones["upper_arm_parent.L"]
     switch["IK_FK"] = 0.0
-    checks.check(run_operator() == {'CANCELLED'}, "refused with an arm in IK")
-    try:
-        generation.check_limbs_fk(rig, rig_profile, 1, 120)
-        message = ""
-    except ValueError as e:
-        message = str(e)
-    checks.check("arm.L" in message and "Snap FK to IK" in message, f"the message names the limb ({message})")
+    rig.update_tag()
+    arm = ["ORG-upper_arm.L", "ORG-forearm.L", "ORG-hand.L"]
+    key_frames = [1, 61, 90, 120]
+    ik_pose = snapshot(rig, arm, key_frames)
+    checks.check(run_operator() == {'FINISHED'}, "generated with an arm in IK")
+    checks.check(switch["IK_FK"] == 1.0, "the arm is switched to FK")
+    angle, _dist = worst_change(rig, ik_pose)
+    checks.below(angle, 0.01, "the arm keeps its IK pose on the key poses, worst direction (deg)")
+    # The IK hand stays at rest while the character walks away: Rigify's IK stretches the arm (by a metre), which
+    # the FK chain doesn't. Only the shoulder joint keeps its place; tests/blender/test_generate_ik.py checks a
+    # real IK pose.
+    _angle, dist = worst_change(rig, {f: {"ORG-upper_arm.L": bones["ORG-upper_arm.L"]} for f, bones in ik_pose.items()})
+    checks.below(dist, 0.01, "the shoulder joint stays in place on the key poses (cm)")
+    after_keys = keys_by_type(rig, generation)
+    snapped = after_keys[('pose.bones["forearm_fk.L"].rotation_quaternion', 0)]
+    checks.check(all(snapped[f][1] == 'KEYFRAME' for f in key_frames), "the snapped FK keys are user keys")
+    checks.check(quaternion_flips(rig, generation, controls) == 0, "quaternion signs still continuous")
+
+    # The switch animated, in IK on a key pose: snapped there, keyed in FK on the key poses and the range's ends
     switch["IK_FK"] = 1.0
     switch.keyframe_insert('["IK_FK"]', frame=1)
     switch["IK_FK"] = 0.0
+    switch.keyframe_insert('["IK_FK"]', frame=61)
+    switch["IK_FK"] = 1.0
+    switch.keyframe_insert('["IK_FK"]', frame=120)
+    rig.update_tag()
+    checks.check(run_operator() == {'FINISHED'}, "generated with the switch going to IK on a key pose")
+    fcurve = generation.channelbag(rig).fcurves.find('pose.bones["upper_arm_parent.L"]["IK_FK"]')
+    checks.check(all(abs(fcurve.evaluate(f) - 1.0) < 1e-6 for f in range(1, 121)), "the switch is FK on the range")
+
+    # The switch going to IK between two key poses: refused, the rig untouched
+    switch["IK_FK"] = 0.0
     switch.keyframe_insert('["IK_FK"]', frame=100)
-    checks.check(run_operator() == {'CANCELLED'}, "refused when the switch goes to IK during the range")
+    keys_before = keys_by_type(rig, generation)
+    checks.check(run_operator() == {'CANCELLED'}, "refused when the switch goes to IK between key poses")
+    try:
+        generation.limbs_in_ik(rig, rig_profile, 1, 120, key_frames)
+        message = ""
+    except ValueError as e:
+        message = str(e)
+    checks.check("arm.L" in message and "100" in message, f"the message names the limb and the frame ({message})")
+    checks.check(keys_by_type(rig, generation) == keys_before, "nothing changed on the rig")
 
     # 4. A deleted character: the scene's pointer keeps the object alive, out of every scene
     for collection in list(rig.users_collection):

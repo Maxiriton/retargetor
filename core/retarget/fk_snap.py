@@ -74,19 +74,54 @@ def set_limbs_fk(rig_obj, limbs, view_layer, frames=(), keytype='KEYFRAME'):
     view_layer.update()
 
 
+def _set_key_type(rig_obj, data_path, frame, keytype):
+    """Give the keys of a property on a frame the given type. keyframe_insert keeps the type of a key it
+    replaces (a GENERATED key stays GENERATED)."""
+    anim = rig_obj.animation_data
+    if anim is None or anim.action is None:
+        return
+    from bpy_extras.anim_utils import action_get_channelbag_for_slot
+    channelbag = action_get_channelbag_for_slot(anim.action, anim.action_slot)
+    if channelbag is None:
+        return
+    for fcurve in channelbag.fcurves:
+        if fcurve.data_path != data_path:
+            continue
+        for point in fcurve.keyframe_points:
+            if abs(point.co.x - frame) < 0.5:
+                point.type = keytype
+
+
+def snap_fk_keys(rig_obj, limbs_by_frame, scene, view_layer, keytype='KEYFRAME'):
+    """On each frame of {frame: limbs}, snap the FK controls of the limbs to the bones they follow and key their
+    rotation with the given type. A quaternion keeps the sign the curve had there, so it doesn't spin the long way
+    from the keys around it. The current frame is restored at the end."""
+    original_frame = scene.frame_current
+    pose_bones = rig_obj.pose.bones
+    try:
+        for frame in sorted(limbs_by_frame):
+            limbs = limbs_by_frame[frame]
+            scene.frame_set(frame)
+            before = {pair.fk_control: pose_bones[pair.fk_control].rotation_quaternion.copy()
+                      for limb in limbs for pair in limb.controls if pose_bones.get(pair.fk_control) is not None}
+            snap_fk_pose(rig_obj, limbs, view_layer)
+            for limb in limbs:
+                for pair in limb.controls:
+                    pb = pose_bones[pair.fk_control]
+                    if pb.rotation_mode == 'QUATERNION':
+                        q = pb.rotation_quaternion.copy()
+                        q.make_compatible(before[pair.fk_control])
+                        pb.rotation_quaternion = q
+                    data_path = _rotation_data_path(pb)
+                    pb.keyframe_insert(data_path, frame=frame, keytype=keytype)
+                    _set_key_type(rig_obj, pb.path_from_id(data_path), frame, keytype)
+    finally:
+        scene.frame_set(original_frame)
+
+
 def snap_fk_on_frames(rig_obj, limbs, scene, view_layer, frames, keytype='KEYFRAME'):
     """Snap the FK controls to the followed bones on each frame and key their rotation,
     then switch the limbs to FK. The current frame is restored at the end."""
     frames = sorted(set(int(f) for f in frames))
-    original_frame = scene.frame_current
-    try:
-        for frame in frames:
-            scene.frame_set(frame)
-            snap_fk_pose(rig_obj, limbs, view_layer)
-            for limb in limbs:
-                for pair in limb.controls:
-                    pb = rig_obj.pose.bones[pair.fk_control]
-                    pb.keyframe_insert(_rotation_data_path(pb), frame=frame, keytype=keytype)
-    finally:
-        scene.frame_set(original_frame)
+    snap_fk_keys(rig_obj, {frame: limbs for frame in frames}, scene, view_layer, keytype)
     set_limbs_fk(rig_obj, limbs, view_layer, frames=frames, keytype=keytype)

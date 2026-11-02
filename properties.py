@@ -183,6 +183,10 @@ class RTGTR_FkPair(PropertyGroup):
                                   override=OVERRIDABLE)
 
 
+class RTGTR_BoneRef(PropertyGroup):
+    bone: StringProperty(name="Bone", override=OVERRIDABLE)
+
+
 class RTGTR_LimbSnap(PropertyGroup):
     """How to snap one limb's FK controls to its IK pose and switch it to FK"""
     name: StringProperty(name="Limb", override=OVERRIDABLE)
@@ -193,6 +197,8 @@ class RTGTR_LimbSnap(PropertyGroup):
     fk_value: FloatProperty(name="FK Value", description="Value of the switch property in FK", default=1.0,
                             override=OVERRIDABLE)
     controls: CollectionProperty(type=RTGTR_FkPair, override=OVERRIDABLE_COLLECTION)
+    ik_controls: CollectionProperty(type=RTGTR_BoneRef, override=OVERRIDABLE_COLLECTION,
+                                    description="Controls posing the limb in IK: their keys make key poses")
 
 
 class RTGTR_RigProfile(PropertyGroup):
@@ -219,6 +225,7 @@ class RTGTR_RigProfile(PropertyGroup):
                 name=limb.name, switch_bone=limb.switch_bone, switch_property=limb.switch_property,
                 fk_value=limb.fk_value,
                 controls=[core_profile.FkPair(p.fk_control, p.followed_bone) for p in limb.controls],
+                ik_controls=[ref.bone for ref in limb.ik_controls if ref.bone],
             ))
         return result
 
@@ -249,6 +256,8 @@ class RTGTR_RigProfile(PropertyGroup):
                 control = item.controls.add()
                 control.fk_control = pair.fk_control
                 control.followed_bone = pair.followed_bone
+            for name in limb.ik_controls:
+                item.ik_controls.add().bone = name
 
 
 classes = (
@@ -257,6 +266,7 @@ classes = (
     RTGTR_Correction,
     RTGTR_RoleBinding,
     RTGTR_FkPair,
+    RTGTR_BoneRef,
     RTGTR_LimbSnap,
     RTGTR_RigProfile,
 )

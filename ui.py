@@ -182,6 +182,10 @@ class RETARGETOR_PT_RigProfilePanel(Panel):
                     row.prop_search(pair, "fk_control", obj.pose, "bones", text="")
                     row.label(icon='FORWARD')
                     row.prop_search(pair, "followed_bone", obj.pose, "bones", text="")
+                if len(limb.ik_controls) > 0:
+                    box.label(text="IK controls (their keys make key poses)")
+                    for ref in limb.ik_controls:
+                        box.prop_search(ref, "bone", obj.pose, "bones", text="")
             layout.operator("retargetor.snap_fk_to_ik", icon='SNAP_ON')
 
 

@@ -52,6 +52,7 @@ def missing_bones(armature, rig_profile):
         used.update(name for name in (b.read_bone, b.write_bone) if name)
     for limb in rig_profile.limbs:
         used.update(name for pair in limb.controls for name in (pair.fk_control, pair.followed_bone))
+        used.update(limb.ik_controls)
         if limb.switch_bone:
             used.add(limb.switch_bone)
     return sorted(name for name in used if armature.bones.get(name) is None)

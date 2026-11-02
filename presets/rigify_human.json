@@ -207,6 +207,11 @@
                     "hand_fk.L",
                     "ORG-hand.L"
                 ]
+            ],
+            "ik_controls": [
+                "upper_arm_ik.L",
+                "hand_ik.L",
+                "upper_arm_ik_target.L"
             ]
         },
         {
@@ -227,6 +232,11 @@
                     "hand_fk.R",
                     "ORG-hand.R"
                 ]
+            ],
+            "ik_controls": [
+                "upper_arm_ik.R",
+                "hand_ik.R",
+                "upper_arm_ik_target.R"
             ]
         },
         {
@@ -251,6 +261,14 @@
                     "toe_fk.L",
                     "ORG-toe.L"
                 ]
+            ],
+            "ik_controls": [
+                "thigh_ik.L",
+                "foot_ik.L",
+                "thigh_ik_target.L",
+                "toe_ik.L",
+                "foot_heel_ik.L",
+                "foot_spin_ik.L"
             ]
         },
         {
@@ -275,6 +293,14 @@
                     "toe_fk.R",
                     "ORG-toe.R"
                 ]
+            ],
+            "ik_controls": [
+                "thigh_ik.R",
+                "foot_ik.R",
+                "thigh_ik_target.R",
+                "toe_ik.R",
+                "foot_heel_ik.R",
+                "foot_spin_ik.R"
             ]
         }
     ]

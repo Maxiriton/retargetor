@@ -16,6 +16,7 @@ from .backends import process, protocol, registry
 from .core import profile as core_profile
 from .core.motion import GenerationRequest
 from .core.pose_io import read_pose, write_motion_fcurves
+from .core.retarget.fk_snap import set_limbs_fk, snap_fk_keys
 from .core.retarget.snap import Retargeter, compute_translation_scale
 from .core.skeleton import Skeleton
 from .core.skeleton_io import armature_backend, armature_skeleton, build_armature
@@ -73,9 +74,20 @@ def user_key_frames(rig, bones=None):
     return sorted(frames)
 
 
-def check_limbs_fk(rig, rig_profile, start, end):
-    """Raises ValueError if a limb of the profile is in IK somewhere between start and end"""
+def _switch_fcurve(rig, limb):
     bag = channelbag(rig)
+    if bag is None:
+        return None
+    data_path = f'pose.bones["{bpy.utils.escape_identifier(limb.switch_bone)}"]' \
+                f'["{bpy.utils.escape_identifier(limb.switch_property)}"]'
+    return bag.fcurves.find(data_path)
+
+
+def limbs_in_ik(rig, rig_profile, start, end, key_frames):
+    """The limbs of the profile in IK somewhere between start and end: ({key frame: limbs in IK on it},
+    every limb in IK on the range). Raises ValueError if a limb's IK/FK switch has a key in IK inside the
+    range, off the key poses: switching the limb to FK on the key poses and the range's ends wouldn't cover it."""
+    by_frame = {}
     in_ik = []
     for limb in rig_profile.limbs:
         if not limb.switch_bone or not limb.switch_property:
@@ -83,26 +95,43 @@ def check_limbs_fk(rig, rig_profile, start, end):
         switch = rig.pose.bones.get(limb.switch_bone)
         if switch is None or limb.switch_property not in switch:
             continue
-        data_path = f'pose.bones["{bpy.utils.escape_identifier(limb.switch_bone)}"]' \
-                    f'["{bpy.utils.escape_identifier(limb.switch_property)}"]'
-        fcurve = bag.fcurves.find(data_path) if bag is not None else None
+        fcurve = _switch_fcurve(rig, limb)
         if fcurve is not None:
-            values = [fcurve.evaluate(frame) for frame in range(start, end + 1)]
+            values = {frame: fcurve.evaluate(frame) for frame in range(start, end + 1)}
         else:
-            values = [float(switch[limb.switch_property])]
-        if any(abs(value - limb.fk_value) > 1e-3 for value in values):
-            in_ik.append(limb.name)
-    if in_ik:
-        raise ValueError(f"Limbs in IK on frames {start}-{end}: {', '.join(in_ik)}. The motion is written to the "
-                         "FK controls: snap them to the IK pose first (Rig Profile panel, Snap FK to IK).")
+            values = dict.fromkeys(range(start, end + 1), float(switch[limb.switch_property]))
+        if all(abs(value - limb.fk_value) <= 1e-3 for value in values.values()):
+            continue
+        if fcurve is not None:
+            stray = [round(p.co.x) for p in fcurve.keyframe_points
+                     if start < p.co.x < end and round(p.co.x) not in key_frames
+                     and abs(p.co.y - limb.fk_value) > 1e-3]
+            if stray:
+                raise ValueError(f"The IK/FK switch of '{limb.name}' has keys in IK on frames "
+                                 f"{', '.join(map(str, stray))}, between key poses. The motion is written to the FK "
+                                 "controls: key the switch in FK there, or key a pose on these frames.")
+        in_ik.append(limb)
+        for frame in key_frames:
+            if abs(values[frame] - limb.fk_value) > 1e-3:
+                by_frame.setdefault(frame, []).append(limb)
+    return by_frame, in_ik
+
+
+def snap_limbs_to_fk(context, rig, by_frame, in_ik, start, end):
+    """Snap the FK controls of the limbs in IK to their IK pose on the key frames (user keys, type Keyframe),
+    then switch the limbs to FK on the range. The user's IK keys are kept."""
+    scene, view_layer = context.scene, context.view_layer
+    snap_fk_keys(rig, by_frame, scene, view_layer)
+    set_limbs_fk(rig, in_ik, view_layer, frames=sorted(set(by_frame) | {start, end}))
 
 
 def find_key_frames(rig, rig_profile):
-    """The key poses: frames where a write control of the profile has a user key (sorted, maybe empty).
-    Raises ValueError if the profile has no control to write."""
+    """The key poses: frames where a write control of the profile, or an IK control of one of its limbs, has a
+    user key (sorted, maybe empty). Raises ValueError if the profile has no control to write."""
     controls = [b.write_bone for b in rig_profile.roles if b.write_bone]
     if not controls:
         raise ValueError(f"The rig profile of '{rig.name}' has no control to write: load a preset or map the roles.")
+    controls += [name for limb in rig_profile.limbs for name in limb.ik_controls]
     return user_key_frames(rig, controls)
 
 
@@ -139,8 +168,11 @@ def remove_generated_keys(rig, bones, start, end):
 
 
 def fix_quaternion_signs(rig, bones):
-    """Give every GENERATED rotation key the sign of the key before it (user keys included), so the rotation
-    never spins the long way between a user key and a generated one. q and -q are the same rotation."""
+    """Make the quaternion curves of the bones continuous around the GENERATED keys: q and -q are the same
+    rotation, but the curve between them spins the long way. A GENERATED key takes the sign of the key before
+    it. A user key right after a GENERATED one may be opposite to it (the motion turned more than half a turn
+    since the previous key pose): it is flipped, and so are the keys after it while they disagree. The pose
+    never changes, only the stored signs."""
     bag = channelbag(rig)
     if bag is None:
         return
@@ -151,18 +183,23 @@ def fix_quaternion_signs(rig, bones):
             continue
         points = [{round(p.co.x): p for p in fc.keyframe_points} for fc in curves]
         previous = None
+        follow = False  # the previous key was GENERATED or flipped: this one follows it
         flipped = False
         for frame in sorted(set().union(*points)):
             keys = [p.get(frame) for p in points]
             q = [key.co.y if key is not None else fc.evaluate(frame) for key, fc in zip(keys, curves)]
-            generated = all(key is not None and key.type == GENERATED for key in keys)
-            if generated and previous is not None and sum(a * b for a, b in zip(q, previous)) < 0.0:
+            complete = all(key is not None for key in keys)
+            generated = complete and all(key.type == GENERATED for key in keys)
+            flip = (complete and (generated or follow) and previous is not None
+                    and sum(a * b for a, b in zip(q, previous)) < 0.0)
+            if flip:
                 for key in keys:
                     key.co.y = -key.co.y
                     key.handle_left.y = -key.handle_left.y
                     key.handle_right.y = -key.handle_right.y
                 q = [-v for v in q]
                 flipped = True
+            follow = generated or flip
             previous = q
         if flipped:
             for fc in curves:
@@ -355,6 +392,7 @@ class GenerationTask:
         self.translation_scale = 1.0
         self.errors = set()
         self.result = None  # (frames written, keys removed) once finished
+        self.notes = []  # what was done to the rig besides the generated keys (FK snap...)
         self.writer = None
         self.cancel_requested = False
         # The rig was changed before the backend answered (FK snap...): a cancelled generation keeps it
@@ -402,8 +440,14 @@ class GenerationTask:
                                              scene.render.fps / scene.render.fps_base, len(self.key_frames))
         if problem:
             raise ValueError(problem)
-        check_limbs_fk(rig, self.rig_profile, self.start_frame, self.end_frame)
+        snaps, in_ik = limbs_in_ik(rig, self.rig_profile, self.start_frame, self.end_frame, self.key_frames)
         self.worker = registry.worker_for(self.backend, backend_settings(context, self.backend))
+        if in_ik:
+            # Before anything else changes the rig: the generated motion is written to the FK controls
+            snap_limbs_to_fk(context, rig, snaps, in_ik, self.start_frame, self.end_frame)
+            self.modified = True
+            self.notes.append(f"{', '.join(limb.name for limb in in_ik)} switched to FK, "
+                              f"FK snapped to IK on {len(snaps)} key poses")
         model = model_armature(context, rig, self.backend)
         if model is None:
             self.stage = SKELETON

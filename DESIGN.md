@@ -24,8 +24,9 @@ The animation itself is the source of truth: key poses are not stored in a separ
 ## IK and FK
 
 - **Generated motion is always written to FK controls.** Writing to IK controls is inexact (Rigify's IK bones stretch slightly, so elbows and knees end up a few cm off; see `spikes/phase1/README.md`).
-- **Limbs posed in IK**: before reading the key poses, the FK controls are snapped to the IK pose on the key frames, and the limbs are switched to FK. The user's IK keys are kept.
-- The rig profile describes, per limb, which FK control follows which bone and which property switches IK/FK.
+- **Limbs posed in IK**: before reading the key poses, the FK controls are snapped to the IK pose on the key frames, and the limbs are switched to FK. The user's IK keys are kept. The snapped FK keys are user keys (type Keyframe): they are key poses from then on.
+- The rig profile describes, per limb, which FK control follows which bone, which property switches IK/FK, and the limb's IK controls: a key on an IK control makes a key pose, like a key on a write control.
+- An animated switch is keyed in FK on the key poses and the ends of the range. A switch key in IK between two key poses can't be covered that way: the generation stops and says so.
 - **After generation, the limbs simply play in FK.** No switch keyed per segment, no snap back to IK for now; to revisit with usage.
 
 ## Where the result goes

@@ -50,12 +50,23 @@ def _cancelled(operator, task):
     return {'CANCELLED'}
 
 
+def _failed(operator, task, error):
+    """An error. If the rig was already changed (FK snap...), the operator still finishes: one undo step."""
+    operator.report({'ERROR'}, str(error.args[0]) if error.args else str(error))
+    if task.modified:
+        operator.report({'WARNING'}, "The changes made to the rig before the error are kept (Ctrl+Z to undo them)")
+        return {'FINISHED'}
+    return {'CANCELLED'}
+
+
 def _report_result(operator, task):
     frames, removed = task.result
     timings = ", ".join(f"{name} {seconds:.1f} s" for name, seconds in task.timings.items())
     operator.report({'INFO'}, f"{frames} frames generated on '{task.rig_name}' with {task.backend.label} "
                               f"(frames {task.start_frame}-{task.end_frame}, {len(task.key_frames)} key poses; "
                               f"{timings})")
+    for note in task.notes:
+        operator.report({'INFO'}, note)
     if task.errors:
         operator.report({'WARNING'}, "Some bones were skipped: " + "; ".join(sorted(task.errors)))
 
@@ -84,8 +95,7 @@ class RTGTR_OT_GenerateInbetweens(Operator):
             if not task.run(context, rig):
                 return _cancelled(self, task)
         except GENERATION_ERRORS as e:
-            self.report({'ERROR'}, str(e.args[0]) if e.args else str(e))
-            return {'CANCELLED'}
+            return _failed(self, task, e)
         _report_result(self, task)
         return {'FINISHED'}
 
@@ -95,8 +105,7 @@ class RTGTR_OT_GenerateInbetweens(Operator):
         try:
             task.start(context, rig)
         except GENERATION_ERRORS as e:
-            self.report({'ERROR'}, str(e.args[0]) if e.args else str(e))
-            return {'CANCELLED'}
+            return _failed(self, task, e)
         self._task = task
         generation.current_task = task
         window_manager = context.window_manager
@@ -135,8 +144,7 @@ class RTGTR_OT_GenerateInbetweens(Operator):
             finished = task.update(context)
         except GENERATION_ERRORS as e:
             self._finish(context)
-            self.report({'ERROR'}, str(e.args[0]) if e.args else str(e))
-            return {'CANCELLED'}
+            return _failed(self, task, e)
         if not finished:
             self._status(context)
             return {'PASS_THROUGH'}

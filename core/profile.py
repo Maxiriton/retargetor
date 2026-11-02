@@ -57,12 +57,15 @@ class LimbSnap:
     switch_bone / switch_property: the custom property that switches IK/FK (Rigify: "upper_arm_parent.L", "IK_FK").
     fk_value: the value of that property in FK (Rigify: 1.0).
     controls: the FK controls, parents first.
+    ik_controls: the controls posing the limb in IK (Rigify: "hand_ik.L", "upper_arm_ik_target.L"...): a user key
+    on one of them makes a key pose, like a key on a write control.
     """
     name: str
     switch_bone: str = ""
     switch_property: str = ""
     fk_value: float = 1.0
     controls: list[FkPair] = field(default_factory=list)
+    ik_controls: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -99,6 +102,7 @@ class RigProfile:
                     "switch_property": limb.switch_property,
                     "fk_value": limb.fk_value,
                     "controls": [[p.fk_control, p.followed_bone] for p in limb.controls],
+                    "ik_controls": list(limb.ik_controls),
                 }
                 for limb in self.limbs
             ],
@@ -143,6 +147,7 @@ class RigProfile:
                 switch_property=entry.get("switch_property", ""),
                 fk_value=float(entry.get("fk_value", 1.0)),
                 controls=[FkPair(fk, followed) for fk, followed in entry.get("controls", [])],
+                ik_controls=[str(name) for name in entry.get("ik_controls", [])],
             ))
         return profile
 

@@ -1,7 +1,7 @@
 """Generate In-betweens with Kimodo (needs the Kimodo venv and a CUDA GPU), on the Phase 1 Rigify rig.
 
     blender -b --factory-startup <rig_keyposes.blend> --python tests/blender/test_generate_kimodo.py --
-        <base|heading|fps24|range> <kimodo python> <out dir> [<spike rig_result.json dump>]
+        <base|heading|fps24|range|ik> <kimodo python> <out dir> [<spike rig_result.json dump>]
 
 base:    key poses on frames 1, 61, 120 at 30 fps, prompt and seed of the Phase 1 spike. Writes the rig's motion
          to <out dir>/base.json. Compared with the spike's result if its dump is given (tests/run_tests.py
@@ -10,6 +10,8 @@ heading: the whole character turned 90 degrees around Z (its torso control, on e
          must be the base result turned 90 degrees.
 fps24:   the scene at 24 fps, key poses moved to the same times (frames 1, 49, 96): the result must follow
          the base result at the same times.
+ik:      on rig_keyposes_ik.blend (the same key poses made with the IK controls only, every limb in IK): the
+         FK controls are snapped to the IK pose automatically; the result must be close to the base one.
 range:   custom ranges: the prompt alone (no key pose, the character turned 90 degrees), starting from one key
          pose, ending on one key pose.
 """
@@ -328,6 +330,28 @@ def run_range(checks, kimodo_python):
     checks.below(jump_cm(rig, 119, 120), 5.0, "one key pose at the end: no jump before it (cm)")
 
 
+def run_ik(checks, kimodo_python, out_dir):
+    rig = setup(kimodo_python)
+    keys = [1, 61, 120]
+    before = motion_snapshot(rig, keys)
+    switches = [rig.pose.bones[limb.switch_bone] for limb in rig.data.retargetor_profile.to_core().limbs]
+    checks.check(all(s["IK_FK"] == 0.0 for s in switches), "every limb starts in IK")
+    task = generate(checks, "IK limbs, first generation (starts Kimodo)")
+    print("FINDING " + "; ".join(task.notes))
+    checks.check(all(s["IK_FK"] == 1.0 for s in switches), "every limb switched to FK")
+    after = motion_snapshot(rig, keys)
+    _ma, worst_angle, _md, worst_dist = compare(before, after, [(f, f) for f in keys])
+    checks.below(worst_angle, 0.05, "IK pose kept on the key poses, worst direction (deg)")
+    checks.below(worst_dist, 1.0, "IK pose kept on the key poses, worst head (cm, Rigify's IK stretch)")
+    check_follows_model(checks, rig, range(1, 121), "IK limbs")
+    # The IK key poses are the FK ones up to Rigify's IK stretch (up to 2.7 degrees on the elbows)
+    base = load_snapshot(os.path.join(out_dir, "base.json"))
+    mean_a, worst_a, mean_d, worst_d = compare(base, motion_snapshot(rig, range(1, 121)), [(f, f) for f in range(1, 121)])
+    print(f"FINDING IK limbs vs base (FK key poses): directions mean {mean_a:.2f} deg, worst {worst_a:.1f} deg; "
+          f"heads mean {mean_d:.1f} cm, worst {worst_d:.1f} cm")
+    checks.below(mean_a, 5.0, "IK limbs: close to the base result, mean direction (deg)")
+
+
 def main():
     args = bootstrap.script_args()
     mode, kimodo_python, out_dir = args[0], args[1], args[2]
@@ -342,6 +366,8 @@ def main():
             run_fps24(checks, kimodo_python, out_dir)
         elif mode == "range":
             run_range(checks, kimodo_python)
+        elif mode == "ik":
+            run_ik(checks, kimodo_python, out_dir)
     finally:
         from retargetor.backends import registry
         registry.stop_all()

@@ -130,8 +130,8 @@ Set the profile up in the rig's own file. In a shot file that links the rig, the
 ## Generate in-betweens
 
 1. **Set up the rig profile** of your character (Rig Profile panel, for example **Load Preset** for a Rigify rig), and choose the character as **Target** in the Retarget panel.
-2. **Key your poses** on the controls of the profile (on Rigify, the FK controls and the torso). Any keyframe type works except **Generated**: Keyframe, Breakdown, Extreme... A frame is a key pose as soon as one of those controls has a key on it.
-3. **Limbs in IK**: generation writes the FK controls, so it refuses to run while a limb of the profile is in IK on the range. Use **Snap FK to IK** (Rig Profile panel) on your key frames first.
+2. **Key your poses** on the controls of the profile (on Rigify, the FK or IK controls and the torso). Any keyframe type works except **Generated**: Keyframe, Breakdown, Extreme... A frame is a key pose as soon as one of those controls has a key on it.
+3. **Limbs in IK** are handled for you: the generated motion is written to the FK controls, so before generating, the FK controls of a limb in IK are snapped to its IK pose on each key pose (keyed as normal keys) and the limb is switched to FK. Your IK keys are kept. If the IK/FK switch is animated, it is keyed in FK on the key poses and the ends of the range; a switch key in IK between two key poses stops the generation (key the switch in FK there, or key a pose on that frame). After generation the limbs play in FK.
 4. In the **Generate** panel, write a **prompt** (what the character does) and choose a **seed**, then click **Generate In-betweens**. The panel and the status bar show the progress: the model's own steps, then the keys being written onto the rig. **Esc** (or the cancel button) stops the generation until the keys are being written; writing takes a few seconds and can't be stopped (Blender stays responsive meanwhile, you can look around but not edit).
 
 The model generates the motion from your first key pose to your last one. The result is written on the rig's controls as **Generated** keys, on every frame between the key poses.
