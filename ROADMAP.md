@@ -132,12 +132,17 @@ Findings:
 - **Writing the keys is the bottleneck of a fast model**: about 22 ms per frame on Rigify, all of it in the rig's evaluation (5 scene updates per frame, one per dependency level); keying itself costs nothing. Writing a motion on the model's own armature takes 0.2 ms per frame (F-curves written in bulk). The protocol costs 1 ms per round trip and 0.5 MB for 10 s of SOMA motion.
 - **Windows pipes.** A thread waiting on the stdin pipe blocked scipy's DLLs (imported by Kimodo) from loading; workers read from a private copy of stdin.
 
-### Phase 4: controller rigs
+### Phase 4: controller rigs and workflow
 
-- [ ] IK/FK limbs, Rigify: when a limb is posed in IK, snap its FK controls to the IK pose on the key frames, then work in FK only (tested in Phase 1: exact). Describe the snap in the rig profile (FK control ↔ followed bone, IK/FK switch property). After generation the limbs play in FK; revisit with usage.
-- [ ] Partial poses: constrain only the keyed controls (end-effectors).
-- [ ] Regenerate a single segment between two keys.
+Order set after the first test on the user's own Rigify character (2026-11-02): everything worked, but setting up the rig profile is intimidating, and the progress bar stops around 93% (Kimodo's post-processing and the key writing send no progress; the writing blocks Blender in one go).
+
+- [ ] Progress over the whole generation: a "Post-processing" step from the worker after denoising, and the keys written in chunks over several timer ticks (for example 10 frames per tick) with their own progress, so Blender stays responsive. Still one undo step; decide what Esc does while writing (refuse, or undo everything).
+- [ ] Generate with fewer than two key poses: an optional custom range on the character (start frame, current frame by default, and a duration) next to the default range from the key poses. 0 key poses: motion from the prompt only, starting from the character's position and heading on the start frame. 1 key pose: the motion starts from it (or ends on it). The range may also go past the last key pose to extend an animation. Key poses outside the range are ignored; user keys stay protected. Each backend declares the minimum number of key poses it needs (Kimodo 0, interpolation 2); the panel only offers what the active backend allows and warns past its maximum duration (Kimodo 10 s).
+- [ ] IK/FK limbs, Rigify: when a limb is posed in IK, snap its FK controls to the IK pose on the key frames automatically, then work in FK only (tested in Phase 1: exact), instead of refusing as in Phase 3. The snap is already described in the rig profile. After generation the limbs play in FK; revisit with usage.
+- [ ] Detect a Rigify rig and apply the Rigify preset automatically, so a Rigify character needs no profile setup.
 - [ ] Retype edited `GENERATED` keys as user keys before regenerating (Blender keeps the `GENERATED` type when a key is replaced: see the Phase 3 findings).
+- [ ] Regenerate a single segment between two keys.
+- [ ] Partial poses: constrain only the keyed controls (end-effectors).
 - [ ] Test the jumps around key poses; blend if needed.
 
 ### Phase 5: user experience and release
@@ -174,6 +179,8 @@ Findings:
 | 2026-11-02 | numpy is used where it helps (backends, bulk writing): it ships with Blender and with the model venvs. Unit tests run with Blender's own Python. |
 | 2026-11-02 | Protocol: JSON lines on the worker's stdin / stdout; bulk data as base64 float32 arrays in the skeleton's joint order; a motion may come in several chunks (streaming models such as NVIDIA ARDY). Kept small on purpose: with a fast model, the bottleneck is writing the keys, not the protocol. |
 | 2026-11-02 | The model's armature follows the rig object's placement (not its scale); its poses are read and written in its own armature space, so the motion is generated in the character's space. |
+| 2026-11-02 | A generation may use 0 or 1 key pose with a custom range (start, duration), when the backend allows it; without a key pose the motion starts from the character's current position and heading. The custom range prepares the prompt segments of Phase 5. |
+| 2026-11-02 | Phase 4 order, after the first test on the user's own Rigify character: progress and chunked writing, fewer than two key poses, automatic IK → FK snap, automatic Rigify preset, retyping edited generated keys, then the rest. |
 | 2026-11-02 | Kimodo: key poses are moved to Kimodo's canonical frame (origin and heading of the first one, as Kimodo computes it) and the result moved back; `first_heading_angle` is not used. Key frames go to the nearest model frame, the time between key poses is stretched so each lands exactly, and the result is resampled to the scene's rate. |
 
 ## Open questions
