@@ -3,16 +3,17 @@
     python tests/run_tests.py [--blender <blender.exe>] [--spikes <folder with phase0/out and phase1/out>]
 
 Blender 5.2+ is needed (default: the BLENDER environment variable, else the standard Windows install path).
+The unit tests run with Blender's own Python (it has numpy), found next to blender.exe.
 The chain tests need the spike outputs (not committed): they are skipped when missing. Default: spikes/ in this
 repository, or the RETARGETOR_SPIKES environment variable.
 The migration test builds a legacy file with the add-on as it was before Phase 2 (commit LEGACY_COMMIT).
 """
 import argparse
+import glob
 import os
 import subprocess
 import sys
 import tempfile
-import unittest
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BLENDER_TESTS = os.path.join(REPO, "tests", "blender")
@@ -35,6 +36,24 @@ def run_blender(blender, script, args=(), blend=None, env=None):
     return ok
 
 
+def blender_python(blender):
+    """The Python executable shipped with Blender: <blender dir>/<version>/python/bin/python.exe"""
+    found = sorted(glob.glob(os.path.join(os.path.dirname(blender), "*", "python", "bin", "python*")))
+    found = [path for path in found if os.path.basename(path).lower() in ("python.exe", "python3", "python")]
+    if not found:
+        raise SystemExit(f"Blender's Python not found next to {blender}")
+    return found[-1]
+
+
+def run_unit_tests(python):
+    result = subprocess.run([python, "-I", "-m", "unittest", "discover", "-s", os.path.join(REPO, "tests", "unit")],
+                            capture_output=True, text=True, encoding="utf-8", errors="replace")
+    print(result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "")
+    if result.returncode != 0:
+        print(result.stderr[-3000:])
+    return result.returncode == 0
+
+
 def extract_legacy_addon(folder):
     archive = subprocess.run(["git", "-C", REPO, "archive", LEGACY_COMMIT, "--"] + LEGACY_FILES,
                              capture_output=True, check=True).stdout
@@ -51,13 +70,13 @@ def main():
     args = parser.parse_args()
 
     results = {}
-    suite = unittest.defaultTestLoader.discover(os.path.join(REPO, "tests", "unit"))
-    results["unit"] = unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful()
+    results["unit"] = run_unit_tests(blender_python(args.blender))
 
     env = dict(os.environ, RETARGETOR_SPIKES=args.spikes)
     with tempfile.TemporaryDirectory(prefix="retargetor_tests_") as scratch:
         results["panel"] = run_blender(args.blender, "test_panel.py", [scratch], env=env)
         results["pose_io"] = run_blender(args.blender, "test_pose_io.py", env=env)
+        results["skeleton_io"] = run_blender(args.blender, "test_skeleton_io.py", env=env)
         lib_dir = os.path.join(scratch, "library")
         os.makedirs(lib_dir)
         results["library_override"] = run_blender(args.blender, "test_library_override.py", [lib_dir], env=env)

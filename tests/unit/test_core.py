@@ -1,7 +1,7 @@
 """Unit tests for the parts of the core that don't need Blender.
 
-Run from the repository root with plain Python (3.11+):
-    python -m unittest discover -s tests/unit
+Run from the repository root with Blender's Python (tests/run_tests.py does it), or any Python 3.11+ with numpy:
+    <blender>/5.2/python/bin/python.exe -I -m unittest discover -s tests/unit
 """
 import json
 import os
