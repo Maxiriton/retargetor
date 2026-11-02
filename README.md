@@ -147,7 +147,7 @@ Kimodo needs no key pose and generates up to 10 s; the panel says when the range
 - The first generation starts the model (about 20 s with Kimodo); the model then stays loaded, and the next ones take about 3 s plus the time to write the keys (about 3 s for 120 frames). **Start** / **Stop** in the panel load the model ahead of time, or free its memory.
 - The model's skeleton is added to the scene as a hidden armature, in a **Retargetor Models** collection, next to your character.
 - Kimodo works at 30 fps and up to 10 s; other scene rates are handled (the key poses land exactly on the model's frames, the result is resampled to the scene's rate). A character facing any direction works.
-- **Keying over a Generated key keeps it Generated** (that's Blender's behaviour, even with the default keyframe type): to keep an edit, change its type (Dope Sheet, **Key > Keyframe Type**), otherwise the next generation replaces it.
+- **Editing a Generated key makes it yours**: as soon as you change a generated key (move it in the Graph Editor or the Dope Sheet, or key over it after posing the rig), it becomes a **Keyframe**, with the other channels of the same property on that frame, so the next generation keeps it and uses it as a key pose. Cancel the move (right click) and it goes back to Generated. You can also promote a generated key without changing it: **Key > Keyframe Type**.
 
 ### Preferences
 

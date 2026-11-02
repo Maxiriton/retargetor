@@ -24,6 +24,7 @@ Retargetor is a Blender extension (Blender 5.2+) that retargets animation betwee
 | `ui.py` | Sidebar panels and lists (Retarget, Rig Profile, Generate) |
 | `preferences.py` | Add-on preferences: active backend, developer option, each backend's settings (declared by the backend) |
 | `generation.py` | Generate In-betweens step by step (`GenerationTask`): key poses, model armature, request, result baked as `GENERATED` keys |
+| `generated_keys.py` | Edited `GENERATED` keys become Keyframes as soon as they are edited: values recorded after each generation, compared by a depsgraph handler |
 | `generate_operators.py` | Generate (modal, Esc cancels; `execute` blocks, for scripts and tests), cancel, start / stop the model |
 | `core/retarget/` | `pairs.py` (`BonePair`, no `bpy`), `snap.py` (`Retargeter`: snap and bake on given frames, offsets computed from the rigs, each bone keyed in its own rotation mode), `fk_snap.py` (FK controls snapped to the IK pose, used automatically before generating) |
 | `core/roles.py`, `core/profile.py` | Humanoid roles and the rig profile in neutral form, `compose()` (no `bpy`) |
@@ -53,6 +54,7 @@ A backend is a folder in `backends/` with a `Backend` subclass (`backend.py`) an
 - All tests: `python tests/run_tests.py --spikes <folder with phase0/out and phase1/out> [--kimodo-python <venv python.exe>]` (the chain tests need the spike outputs, which are not committed; the Kimodo tests need the venv and a CUDA GPU, and take a few minutes).
 - Unit tests run with Blender's own Python (numpy included), found next to `blender.exe`.
 - Headless: `"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b --factory-startup <file.blend> --python <script.py>`. The `blender` on PATH is 5.0, which is too old for this extension.
+- `fcurve.update()` may move the keys in memory: look keyframe points up again after it (a kept reference reads and writes garbage).
 - Setting a custom property from Python doesn't tag the object: call `obj.update_tag()` before reading anything driven by it (Rigify's IK/FK switch).
 - Live inspection goes through the Blender MCP connector; it needs Blender running with the MCP add-on server started.
 - Machine-specific paths (Kimodo venv, test files) are in `CLAUDE.local.md`, which is not committed.

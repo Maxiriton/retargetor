@@ -12,6 +12,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix
 
+from . import generated_keys
 from .backends import process, protocol, registry
 from .core import profile as core_profile
 from .core.motion import GenerationRequest
@@ -356,6 +357,7 @@ class MotionWriter:
             self.done += len(chunk)
         if self.finished:
             fix_quaternion_signs(self.rig, self.controls)
+            generated_keys.record(self.rig)
             return True
         return False
 
@@ -434,6 +436,12 @@ class GenerationTask:
         self.rig_name = rig.name
         self.backend = active_backend(context)
         self.rig_profile = self._rig_profile(rig)
+        # Generated keys edited since the last generation are user keys (the handler retypes them as soon as they
+        # are edited; this catches what it couldn't see): they may be key poses
+        retyped, _restored = generated_keys.retype_edited(rig)
+        if retyped:
+            self.modified = True
+            self.notes.append(f"{retyped} edited Generated keys became Keyframes")
         self.start_frame, self.end_frame, self.key_frames = generation_range(rig, self.rig_profile)
         scene = context.scene
         problem = self.backend.range_problem(self.start_frame, self.end_frame,
@@ -546,14 +554,15 @@ class GenerationTask:
 
     def run(self, context, rig, timeout=None):
         """Run the whole generation, blocking (scripts, tests). Returns False if it was cancelled."""
-        self.start(context, rig)
-        limit = timeout or (self.backend.load_timeout + self.backend.generate_timeout)
-        begin = time.perf_counter()
-        while not self.update(context, budget=1.0):
-            if time.perf_counter() - begin > limit:
-                self.cancel()
-                raise GenerationError(f"{self.backend.label} didn't finish within {limit:.0f} s.")
-            time.sleep(0.01)
+        with generated_keys.suspended():
+            self.start(context, rig)
+            limit = timeout or (self.backend.load_timeout + self.backend.generate_timeout)
+            begin = time.perf_counter()
+            while not self.update(context, budget=1.0):
+                if time.perf_counter() - begin > limit:
+                    self.cancel()
+                    raise GenerationError(f"{self.backend.label} didn't finish within {limit:.0f} s.")
+                time.sleep(0.01)
         return not self.cancelled
 
 

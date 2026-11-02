@@ -83,6 +83,32 @@ def quaternion_flips(rig, generation, bones):
     return flips
 
 
+def key_at(rig, generation, path, index, frame):
+    fcurve = generation.channelbag(rig).fcurves.find(path, index=index)
+    return next((p for p in fcurve.keyframe_points if abs(p.co.x - frame) < 1e-3), None)
+
+
+def key_type(rig, generation, path, index, frame):
+    key = key_at(rig, generation, path, index, frame)
+    return key.type if key is not None else None
+
+
+def edit_key(rig, generation, path, index, frame, value=None, shift=0.0):
+    """Change a key's value or move it in time, like the Graph Editor, and let the depsgraph see it"""
+    fcurve = generation.channelbag(rig).fcurves.find(path, index=index)
+    key = key_at(rig, generation, path, index, frame)
+    if value is not None:
+        delta = value - key.co.y
+        key.co.y = value
+        key.handle_left.y += delta
+        key.handle_right.y += delta
+    key.co.x += shift
+    key.handle_left.x += shift
+    key.handle_right.x += shift
+    fcurve.update()
+    bpy.context.view_layer.update()
+
+
 def draw_generate_panel():
     """Errors found drawing the Generate panel (see test_panel.CheckingLayout)"""
     from test_panel import CheckingLayout
@@ -205,14 +231,15 @@ def main():
     head = rig.pose.bones["head"]
     head.rotation_quaternion = (0.9, 0.3, 0.0, 0.0)
     head.keyframe_insert("rotation_quaternion", frame=90)
-    # Keying over a GENERATED key keeps its type (Blender's behaviour, even with keytype='KEYFRAME'):
-    # the animator retypes it, as with the Keyframe Type menu (automatic retyping is Phase 4)
-    bag = generation.channelbag(rig)
-    for index in range(4):
-        fcurve = bag.fcurves.find('pose.bones["head"].rotation_quaternion', index=index)
-        point = next(p for p in fcurve.keyframe_points if round(p.co.x) == 90)
-        checks.check(point.type == 'GENERATED', f"FINDING keying over a GENERATED key keeps it GENERATED ({index})")             if index == 0 else None
-        point.type = 'KEYFRAME'
+    # Keying over a GENERATED key keeps its type (Blender's behaviour, even with keytype='KEYFRAME'); the add-on's
+    # handler retypes it as soon as the depsgraph sees the action changed
+    checks.check(key_type(rig, generation, 'pose.bones["head"].rotation_quaternion', 0, 90) == 'GENERATED',
+                 "FINDING keying over a GENERATED key keeps it GENERATED")
+    view_layer.update()
+    checks.check(all(key_type(rig, generation, 'pose.bones["head"].rotation_quaternion', i, 90) == 'KEYFRAME'
+                     for i in range(4)), "the edited key is a Keyframe right away, on its 4 channels")
+    checks.check(key_type(rig, generation, 'pose.bones["neck"].rotation_quaternion', 0, 90) == 'GENERATED',
+                 "the other generated keys of the frame stay Generated")
     keys_before = keys_by_type(rig, generation)
     task = generation.GenerationTask()
     checks.check(task.run(bpy.context, rig), "second generation")
@@ -230,6 +257,46 @@ def main():
     checks.check(task.result[1] == 117 * (18 * 4 + 2 * 3 + 3) - 4, f"{task.result[1]} old GENERATED keys removed")
     scene.frame_set(90)
     checks.close(head.rotation_quaternion.w, 0.9, 1e-6, "the new user key keeps its value")
+
+    # 2a. Edits like the Graph Editor's: a value changed, then put back (a cancelled drag); a key moved in time.
+    # fcurve.update() may move the keys in memory: they are looked up again after each one
+    path = 'pose.bones["forearm_fk.R"].rotation_quaternion'
+    original = key_at(rig, generation, path, 1, 40).co.y
+    edit_key(rig, generation, path, 1, 40, value=original + 0.2)
+    checks.check(all(key_type(rig, generation, path, i, 40) == 'KEYFRAME' for i in range(4)), "value edited: Keyframe")
+    edit_key(rig, generation, path, 1, 40, value=original)
+    checks.check(all(key_type(rig, generation, path, i, 40) == 'GENERATED' for i in range(4)),
+                 "value put back (cancelled drag): Generated again")
+    torso = 'pose.bones["torso"].location'
+    edit_key(rig, generation, torso, 2, 70, shift=0.4)
+    checks.check(key_type(rig, generation, torso, 2, 70.4) == 'KEYFRAME', "key moved in time: Keyframe")
+    edit_key(rig, generation, torso, 2, 70.4, shift=-0.4)
+    checks.check(key_type(rig, generation, torso, 2, 70) == 'GENERATED', "key moved back: Generated again")
+    # An edit the handler didn't see (handler off): retyped when generating; the frame becomes a key pose
+    from retargetor import generated_keys
+    bpy.app.handlers.depsgraph_update_post.remove(generated_keys.retype_edited_handler)
+    edited_value = key_at(rig, generation, torso, 2, 70).co.y + 0.05
+    edit_key(rig, generation, torso, 2, 70, value=edited_value)
+    bpy.app.handlers.depsgraph_update_post.append(generated_keys.retype_edited_handler)
+    checks.check(key_type(rig, generation, torso, 2, 70) == 'GENERATED', "edit unseen: still Generated")
+    task = generation.GenerationTask()
+    checks.check(task.run(bpy.context, rig), "generation after an unseen edit")
+    # The 3 channels of the location on that frame: x, y and z
+    checks.check(any("3 edited Generated keys" in note for note in task.notes) and 70 in task.key_frames,
+                 f"retyped before generating, frame 70 is a key pose ({task.notes}, {task.key_frames})")
+    key = key_at(rig, generation, torso, 2, 70)
+    checks.check(key.type == 'KEYFRAME' and abs(key.co.y - edited_value) < 1e-6, "the edited value is kept")
+    # The generation's own keys don't trigger the handler: only the user keys are Keyframes
+    after = keys_by_type(rig, generation)
+    stray = [(c, f) for c, frames in after.items() for f, (_v, t) in frames.items()
+             if t == 'KEYFRAME' and f not in (1, 61, 70, 90, 120)]
+    checks.check(not stray, f"no generated key retyped by the generation itself ({stray[:3]})")
+    # Back to the key poses of the next sections: frame 70 is no key pose any more
+    for curve in generation.bone_fcurves(rig):
+        for p in list(curve.keyframe_points):
+            if round(p.co.x) == 70 and p.type != 'GENERATED':
+                curve.keyframe_points.remove(p)
+    view_layer.update()
 
     # 2b. Custom range past the last key pose: extends the animation (the interpolation holds the last pose)
     state = rig.retargetor

@@ -36,6 +36,7 @@ from . import retarget_operators
 from . import setup_operators
 from . import profile_operators
 from . import generate_operators
+from . import generated_keys
 from .properties import get_character
 
 # Name of the last active bone seen by the selection handler (UI state, not saved)
@@ -92,6 +93,7 @@ addon_modules = (
     retarget_operators,
     profile_operators,
     generate_operators,
+    generated_keys,
 )
 
 def register():

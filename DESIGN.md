@@ -54,8 +54,8 @@ The animation itself is the source of truth: key poses are not stored in a separ
 ### Implementation notes
 
 - `keyframe_insert(..., keytype='GENERATED')` writes the generated keys.
-- Blender has no "key edited" event. A likely approach: remember the values written at generation time; before regenerating, any `GENERATED` key whose value changed is retyped as a user key. To be checked in Phase 4.
-- Keying over an existing `GENERATED` key keeps it `GENERATED` (Blender keeps the type of a replaced key, even with `keytype='KEYFRAME'`): checked in Phase 3, so the retyping above is needed.
+- Keying over an existing `GENERATED` key keeps it `GENERATED` (Blender keeps the type of a replaced key, even with `keytype='KEYFRAME'`): checked in Phase 3, so the add-on retypes edited keys itself.
+- Blender has no "key edited" event. The add-on remembers the `GENERATED` keys it wrote (frames and values, on the character) and a depsgraph handler compares them whenever a character's action changes (`generated_keys.py`): an edited or moved `GENERATED` key becomes a Keyframe at once, with the other channels of the same property on that frame. Keys retyped that way go back to `GENERATED` when their values come back (a cancelled transform). The same check runs before each generation, for what the handler couldn't see. Checked with Blender's interface: the Graph Editor's translate retypes the key before its undo step is pushed, so undo and redo bring the type back with the value.
 
 ## Continuity around key poses
 
