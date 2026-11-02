@@ -53,6 +53,7 @@ The animation itself is the source of truth: key poses are not stored in a separ
 
 - `keyframe_insert(..., keytype='GENERATED')` writes the generated keys.
 - Blender has no "key edited" event. A likely approach: remember the values written at generation time; before regenerating, any `GENERATED` key whose value changed is retyped as a user key. To be checked in Phase 4.
+- Keying over an existing `GENERATED` key keeps it `GENERATED` (Blender keeps the type of a replaced key, even with `keytype='KEYFRAME'`): checked in Phase 3, so the retyping above is needed.
 
 ## To test later
 
@@ -67,8 +68,8 @@ The animation itself is the source of truth: key poses are not stored in a separ
 | Where | What | Why |
 |---|---|---|
 | **Armature data** (`bpy.types.Armature`) | The **rig profile**: per role, the bone that is read and the control that is written (they differ on controller rigs, e.g. Rigify `ORG-upper_arm.L` / `upper_arm_fk.L`), offset mode, Use Translation flags, corrections per backend | It all depends on the bones, which belong to the Armature data. Objects sharing an armature share its profile. |
-| **Object** (the character in the shot) | Chosen backend, prompt segments, link to its model armature, generation state | Varies per character, so several characters can live in one scene. |
-| **Add-on preferences** | Backend settings: Python path, model, device | Depends on the machine, not on the file. |
+| **Object** (the character in the shot) | Prompt and seed (prompt segments later), link to its model armature | Varies per character, so several characters can live in one scene. |
+| **Add-on preferences** | Active backend and each backend's settings (Kimodo: Python path, model), developer option | Depends on the machine, not on the file. |
 | **JSON** | Export / import of a rig profile | Reuse a mapping on another similar rig. |
 | **Computed, not stored** | Translation scale | Depends on both skeletons together. |
 

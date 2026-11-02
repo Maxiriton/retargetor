@@ -26,13 +26,11 @@ Features and data model (keyframe types, where results and settings are stored) 
 - **A second backend from the start**: a pure Python interpolation backend (slerp between key poses, no GPU). It keeps the interface honest and makes fast tests possible.
 - **Don't over-design**: the interface starts minimal and grows when a real new model needs it.
 
-### Backend interface (draft)
+### Backend interface
 
-- `skeleton()`: joint names, parents, rest pose, and an asset (BVH or .blend) to build its armature in Blender.
-- `capabilities()`: text prompt, full-body keyframes, end-effectors, root path, max length, native fps.
-- `generate(request) -> Motion`, plus `start()`, `stop()`, `status()`, `cancel()`.
-
-The UI only shows what the active backend supports.
+- A backend declares (`backends/base.py`): its capabilities (text prompt, seed, max duration, native fps, streaming), its role → joint map, its settings (shown in the add-on preferences) and the command starting its worker.
+- Its worker answers over JSON lines (`backends/protocol.py`): `skeleton` (joint names, parents, rest heads and tails in Blender conventions; the add-on builds the armature), `load`, `generate` (a `GenerationRequest`), `cancel`, `shutdown`. It sends `progress`, `frames` (the motion, possibly in several chunks, as base64 float32 arrays in the skeleton's joint order), `done` or `error`.
+- The UI only shows what the active backend supports.
 
 ### Target layout
 
@@ -42,9 +40,10 @@ core/roles.py        humanoid roles
 core/motion.py       neutral Pose / Motion / GenerationRequest types (no bpy)
 backends/base.py     backend interface and capabilities
 backends/process.py  worker lifecycle and JSON protocol
+backends/registry.py the backends, their running workers
 backends/interpolate/
-backends/kimodo/     skeleton, role mapping, worker.py (runs in the Kimodo venv)
-ui/
+backends/kimodo/     role mapping, conversions, worker.py (runs in the Kimodo venv)
+generation.py        Generate In-betweens, step by step
 ```
 
 ## Working method
@@ -100,23 +99,45 @@ A correction to Phase 1: the spike's "FK snap vs IK pose: 0.00 cm" was measured 
 
 ### Phase 3: backends
 
-- [ ] Canonicalize the heading as well as the root position (moved from Phase 2).
-- [ ] Move the SOMA role → joint map from `tests/fixtures/soma_roles.json` into `backends/kimodo/`.
-- [ ] Backend interface and JSON worker protocol.
-- [ ] Interpolation backend (pure Python).
-- [ ] Kimodo backend: skeleton, role mapping, conversions, worker running in the Kimodo venv (path set in the add-on preferences).
-- [ ] "Generate in-betweens" operator: reads the key poses from the user keys (any type but `GENERATED`), sends them, writes the result as `GENERATED` keys in the rig's action, without freezing Blender (timer or modal operator). One undo step.
-- [ ] Frame rate handling (model fps vs scene fps).
+- [x] Canonicalize the heading as well as the root position (moved from Phase 2).
+- [x] Move the SOMA role → joint map from `tests/fixtures/soma_roles.json` into `backends/kimodo/`.
+- [x] Backend interface and JSON worker protocol.
+- [x] Interpolation backend (pure Python).
+- [x] Kimodo backend: skeleton, role mapping, conversions, worker running in the Kimodo venv (path set in the add-on preferences).
+- [x] "Generate in-betweens" operator: reads the key poses from the user keys (any type but `GENERATED`), sends them, writes the result as `GENERATED` keys in the rig's action, without freezing Blender (timer or modal operator). One undo step.
+- [x] Frame rate handling (model fps vs scene fps).
+- [x] Never overwrite the user's key poses (moved from Phase 4).
 
 **Done when** switching between the interpolation and Kimodo backends needs no code change outside `backends/`.
+
+**Done (2026-11-02)** on branch `claude/backends-core-a49724`. The backend is a preference; nothing outside `backends/` names one. Results on the Phase 1 Rigify rig (key poses 1, 61, 120, same prompt and seed as the spike), `tests/blender/test_generate_kimodo.py`:
+
+| Check | Result |
+|---|---|
+| Key poses and user keys | Untouched (0.0000°, 0.0000 cm); `GENERATED` keys on every other frame |
+| Rig vs the generated motion | 0.0000° on every limb, hips 0.000 cm |
+| Same as the spike's result | 0.04° mean (the spike's hands were 1.9° off, see below) |
+| First generation (starts the worker, loads the model) | about 17 s: 10.5 s generation, 2.6 s writing the keys |
+| Next generations (model kept loaded) | about 5.7 s: 3.0 s generation, 2.6 s writing |
+| Same seed twice | Identical (0.002 cm) |
+| Character turned 90° (Rigify root) | The base motion turned, 0.00° / 0.00 cm |
+| 24 fps scene, key poses at the same times | The 30 fps motion at the same times, 0.00 cm |
+| Interpolation backend, whole operator | 3 s for 120 frames, no GPU (`tests/blender/test_generate.py`) |
+
+Findings:
+- **Snapping order.** A bone reads its parents' evaluated matrices, which only a scene update refreshes. The five fixed passes of Phase 2 weren't enough: Rigify's hands are 6 levels deep through ORG and MCH constraints (the Phase 1 result was up to 1.9° off on the hands: its "max 1.8° on a hand"), and SOMA's head and arms 7 (a turned character came out wrong). The `Retargeter` now measures the dependencies once (turning each target bone in turn) and snaps level by level: exact in one sweep.
+- **Translation pivot.** The model's hips match the rig's read bone (ORG-spine), not the written control (torso): the 1.9 cm between them must turn with the hips. Fixed with a pivot on the bone pairs.
+- **Euler controls.** Rigify's shoulders are Euler: the retargeter used to switch every target to quaternions, so the user's Euler keys stopped driving them. Bones now keep their rotation mode.
+- **Keying over a `GENERATED` key keeps it `GENERATED`** (Blender keeps the type when a key is replaced, even with `keytype='KEYFRAME'`): an animator's edit is lost at the next generation unless retyped by hand. Phase 4 item below.
+- **Writing the keys is the bottleneck of a fast model**: about 22 ms per frame on Rigify, all of it in the rig's evaluation (5 scene updates per frame, one per dependency level); keying itself costs nothing. Writing a motion on the model's own armature takes 0.2 ms per frame (F-curves written in bulk). The protocol costs 1 ms per round trip and 0.5 MB for 10 s of SOMA motion.
+- **Windows pipes.** A thread waiting on the stdin pipe blocked scipy's DLLs (imported by Kimodo) from loading; workers read from a private copy of stdin.
 
 ### Phase 4: controller rigs
 
 - [ ] IK/FK limbs, Rigify: when a limb is posed in IK, snap its FK controls to the IK pose on the key frames, then work in FK only (tested in Phase 1: exact). Describe the snap in the rig profile (FK control ↔ followed bone, IK/FK switch property). After generation the limbs play in FK; revisit with usage.
-- [ ] Never overwrite the user's key poses: only fill the frames between them.
 - [ ] Partial poses: constrain only the keyed controls (end-effectors).
 - [ ] Regenerate a single segment between two keys.
-- [ ] Retype edited `GENERATED` keys as user keys before regenerating.
+- [ ] Retype edited `GENERATED` keys as user keys before regenerating (Blender keeps the `GENERATED` type when a key is replaced: see the Phase 3 findings).
 - [ ] Test the jumps around key poses; blend if needed.
 
 ### Phase 5: user experience and release
@@ -124,7 +145,8 @@ A correction to Phase 1: the spike's "FK snap vs IK pose: 0.00 cm" was measured 
 - [ ] Prompt segments, visible in the timeline.
 - [ ] Root path drawing (when the backend supports it).
 - [ ] Ghost preview of the model's skeleton (nice-to-have).
-- [ ] Clear error messages, progress and cancel.
+- [ ] Clear error messages, progress and cancel (a first version is in Phase 3).
+- [ ] Faster writing for fast or real-time models: compute the controls' values without scene updates (today about 22 ms per frame on Rigify), or preview on the model's armature while generating.
 - [ ] Documentation and packaging; choose the final name (it should not contain "Kimodo").
 
 ## Decisions
@@ -144,6 +166,15 @@ A correction to Phase 1: the spike's "FK snap vs IK pose: 0.00 cm" was measured 
 | 2026-10-31 | Rest offsets are computed from the two rigs when snapping or baking, not stored (like the translation scale). JSON files keep their format; old offset fields are ignored. |
 | 2026-10-31 | The manual bone list (any source → any target) stays next to the rig profile: both produce `BonePair`s for the same core. The scene only keeps which character the panel edits. |
 | 2026-10-31 | Rig profile presets ship as JSON in `presets/` (same format as the profile export). The SOMA role map lives in the test fixtures until Phase 3. |
+| 2026-11-02 | Each backend describes its skeleton as neutral JSON (joint names, parents, rest heads and tails in Blender conventions); the add-on builds the armature. No BVH import. Kimodo's 77 SOMA joints are read from the user's Kimodo install, so no SOMA data ships with the add-on. Motions come back as JSON too and are written in bulk into F-curves. |
+| 2026-11-02 | User keys are never overwritten (from Phase 3): no write on a frame carrying a user key; the `GENERATED` keys of the range are replaced. |
+| 2026-11-02 | Interpolation backend: slerp / lerp between key poses on its own skeleton (one joint per role), run as a worker with Blender's Python through the same protocol. Only listed with the Developer preference. |
+| 2026-11-02 | One prompt and one seed per character (on the Object) for now; prompt segments are Phase 5. |
+| 2026-11-02 | Phase 3 refuses to generate when a limb of the profile is in IK on the range, and points to Snap FK to IK. Automatic snap is Phase 4. |
+| 2026-11-02 | numpy is used where it helps (backends, bulk writing): it ships with Blender and with the model venvs. Unit tests run with Blender's own Python. |
+| 2026-11-02 | Protocol: JSON lines on the worker's stdin / stdout; bulk data as base64 float32 arrays in the skeleton's joint order; a motion may come in several chunks (streaming models such as NVIDIA ARDY). Kept small on purpose: with a fast model, the bottleneck is writing the keys, not the protocol. |
+| 2026-11-02 | The model's armature follows the rig object's placement (not its scale); its poses are read and written in its own armature space, so the motion is generated in the character's space. |
+| 2026-11-02 | Kimodo: key poses are moved to Kimodo's canonical frame (origin and heading of the first one, as Kimodo computes it) and the result moved back; `first_heading_angle` is not used. Key frames go to the nearest model frame, the time between key poses is stretched so each lands exactly, and the result is resampled to the scene's rate. |
 
 ## Open questions
 - Kimodo's code and weights licence, and what it means for distributing the extension.

@@ -1,8 +1,10 @@
 # Retargetor
 
-**Retarget an animation from one armature to another, even when their rest poses don't match.**
+**Retarget an animation from one armature to another, even when their rest poses don't match, and generate the motion between your key poses with an AI motion model.**
 
 Retargetor is a Blender add-on that copies an animation bone by bone from a *source* armature to a *target* armature. It corrects the orientation differences between the two rest poses, scales the root motion to the size of the target, and bakes the result as keyframes on the target.
+
+It can also **generate in-betweens**: pose your own rig at a few key frames, and a motion model (NVIDIA Kimodo for now) generates the movement between them, written back on your rig's controls.
 
 > **Status:** early version (0.0.1). It works, but expect rough edges. Feedback is welcome.
 
@@ -21,11 +23,13 @@ Retargetor is a Blender add-on that copies an animation bone by bone from a *sou
 - **Smooth rotations**: quaternion signs are kept continuous from frame to frame, so bones never spin the long way round between two keyframes.
 - **Import / export** of the matching as JSON, to reuse a setup on other scenes.
 - **Several characters per scene**: each target armature keeps its own setup.
-- **Rig profile**: map a rig once to humanoid roles (hips, upper arm, shin...), with a bone to read and a control to write for each, and snap the FK controls of IK-posed limbs. A Rigify preset is included. This is the groundwork for the motion generation pipeline (see [ROADMAP.md](ROADMAP.md)).
+- **Rig profile**: map a rig once to humanoid roles (hips, upper arm, shin...), with a bone to read and a control to write for each, and snap the FK controls of IK-posed limbs. A Rigify preset is included.
+- **Generate In-betweens**: the motion between your key poses, from a motion model running in its own process (Blender never freezes, and never loads the model itself). Your keys are never overwritten; the result comes as **Generated** keys. See [ROADMAP.md](ROADMAP.md) for what comes next.
 
 ## Requirements
 
 - Blender **5.2** or newer.
+- For **Generate In-betweens** with Kimodo: a working install of NVIDIA Kimodo in its own Python environment, with the model weights already downloaded, and an NVIDIA GPU (about 7 GB of video memory). The add-on never downloads anything.
 
 ## Installation
 
@@ -123,11 +127,33 @@ The **Rig Profile** panel (same tab) describes how the **active armature** maps 
 
 Set the profile up in the rig's own file. In a shot file that links the rig, the profile is read-only. A library override of the character overrides the object (so the per-character setup in the Retarget panel can be edited and is saved) but **not the armature data**, even with a fully editable override: the profile stays the library's, and edits made there would not be saved. To change the profile in a shot only, override the armature data too (from Python: `rig.data = rig.data.override_create(remap_local_usages=True)`; the Outliner's **Library Override > Make** on the armature data should do the same). Values you change then win over the library, and the others still follow it.
 
+## Generate in-betweens
+
+1. **Set up the rig profile** of your character (Rig Profile panel, for example **Load Preset** for a Rigify rig), and choose the character as **Target** in the Retarget panel.
+2. **Key your poses** on the controls of the profile (on Rigify, the FK controls and the torso). Any keyframe type works except **Generated**: Keyframe, Breakdown, Extreme... A frame is a key pose as soon as one of those controls has a key on it.
+3. **Limbs in IK**: generation writes the FK controls, so it refuses to run while a limb of the profile is in IK on the range. Use **Snap FK to IK** (Rig Profile panel) on your key frames first.
+4. In the **Generate** panel, write a **prompt** (what the character does) and choose a **seed**, then click **Generate In-betweens**. The status bar shows the progress; **Esc** (or the cancel button) stops it.
+
+The model generates the motion from your first key pose to your last one. The result is written on the rig's controls as **Generated** keys, on every frame between the key poses. Frames carrying one of your keys are never written. Generating again replaces the Generated keys of the range and keeps yours. The whole generation is one undo step.
+
+- The first generation starts the model (about 20 s with Kimodo); the model then stays loaded, and the next ones take about 3 s plus the time to write the keys (about 3 s for 120 frames). **Start** / **Stop** in the panel load the model ahead of time, or free its memory.
+- The model's skeleton is added to the scene as a hidden armature, in a **Retargetor Models** collection, next to your character.
+- Kimodo works at 30 fps and up to 10 s; other scene rates are handled (the key poses land exactly on the model's frames, the result is resampled to the scene's rate). A character facing any direction works.
+- **Keying over a Generated key keeps it Generated** (that's Blender's behaviour, even with the default keyframe type): to keep an edit, change its type (Dope Sheet, **Key > Keyframe Type**), otherwise the next generation replaces it.
+
+### Preferences
+
+**Edit > Preferences > Add-ons > Retargetor**:
+
+- **Backend**: the motion model. **Kimodo** for now.
+- **Kimodo Python**: the Python executable of the environment where Kimodo is installed (for example `kimodo-venv\Scripts\python.exe`). **Model**: the Kimodo model to load (`Kimodo-SOMA-RP-v1.1` by default).
+- **Developer**: also lists the test backends (an interpolation without any model, for tests).
+
 ## Good to know
 
 - Only **matched** bones receive keyframes: rotation for all of them, location only for those flagged with translation.
 - Two source bones can't point to the same target bone. Retargetor stops with an explicit message if that happens.
-- The target bones are switched to quaternion rotation.
+- The target bones keep their rotation mode (quaternion, Euler or axis-angle); quaternion keys keep continuous signs.
 - With **Rigify** targets, match the **FK** controls and set the limbs to FK, otherwise the snapped bones will have no visible effect.
 - Retargeting scales the root motion, but it can't remove foot sliding when the legs of the two rigs have very different proportions.
 - **Retarget** runs over the scene's frame range and can take a while on long animations.
@@ -143,9 +169,12 @@ Set the profile up in the rig's own file. In a shot file that links the rig, the
 | `retarget_operators.py` | Snapping and baking |
 | `profile_operators.py` | Rig profile: presets, roles, JSON, Snap FK to IK |
 | `ui.py` | Sidebar panels and lists |
-| `core/` | Retargeting core, humanoid roles, neutral motion types (see below) |
+| `preferences.py` | Add-on preferences: backend, its settings, developer option |
+| `generation.py`, `generate_operators.py` | Generate In-betweens: key poses, request, result as Generated keys; operators |
+| `core/` | Retargeting core, humanoid roles, neutral motion and skeleton types (see below) |
+| `backends/` | Motion model backends, each in its own folder (`kimodo/`, `interpolate/`), and the protocol with their worker processes |
 | `presets/` | Rig profile presets |
-| `tests/` | Unit tests and headless Blender tests (`python tests/run_tests.py`) |
+| `tests/` | Unit tests, headless Blender tests, Kimodo tests (`python tests/run_tests.py`, see the file) |
 | `blender_manifest.toml` | Extension manifest |
 
 The core can be used from scripts, without the scene properties: `core.retarget.snap.Retargeter(source, target, pairs, translation_scale)` snaps (`snap_pose`) or bakes (`bake(scene, view_layer, frames)`) a list of `BonePair`s, and `core.profile.compose(profile, joint_map, direction)` builds those pairs from a rig profile and a skeleton's role → joint map.

@@ -34,7 +34,7 @@ class RTGTR_Preferences(AddonPreferences):
     backend: EnumProperty(name="Backend", items=backend_items,
                           description="Motion model generating the in-betweens")
     developer: BoolProperty(name="Developer", default=False,
-                            description="Show the backends made for testing (interpolation without any model)")
+                            description="Also list the backends made for testing")
 
     def draw(self, context):
         layout = self.layout

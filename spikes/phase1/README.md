@@ -4,6 +4,8 @@
 >
 > Correction (Phase 2): the "FK snap vs the IK key poses: 0.00 cm" below was measured before Rigify's IK/FK switch drivers had updated (setting a custom property from Python doesn't tag the object). Measured correctly, directions stay exact (0.00°) and hands and feet are up to 0.5 cm from the IK pose, which is the IK stretch. The final results are unchanged.
 
+> Correction (Phase 3): the "max 1.8° on a hand" below came from too few snapping passes (five, while Rigify's hands are six dependency levels deep), and the hips were up to 1 cm off (the torso's offset to ORG-spine wasn't turned with the hips). Both are fixed in the `Retargeter`: the rig now follows the generated motion within 0.0000°.
+
 The whole chain, scripted and headless: key poses on a Rigify rig → SOMA → Kimodo → SOMA → back onto the Rigify controls. Uses the current Retargetor unchanged. Outputs go to `out/` (not committed); `out/result.blend` holds the rig with the baked motion and the generated SOMA armature next to it.
 
 ## Results (2026-10-31)
