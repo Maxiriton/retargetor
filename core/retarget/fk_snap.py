@@ -12,6 +12,10 @@ from mathutils import Matrix
 
 from ..profile import IK_FOLLOW, IK_POLE, IK_REST
 
+# Below this bend (distance of the joint from the line of the limb, over the limb's length), a pole is drawn back
+# to its rest side: a nearly straight limb's bend side isn't reliable
+POLE_STRAIGHT = 0.05
+
 
 def _rotation_data_path(pose_bone):
     if pose_bone.rotation_mode == 'QUATERNION':
@@ -150,12 +154,31 @@ def _ik_target(rig_obj, snap):
     parent = followed.parent
     matrix = control.matrix.copy()
     root, joint, end = parent.head, followed.head, followed.tail
-    bend = (joint - root) - (joint - root).project(end - root)
-    if bend.length > 1e-4 * (end - root).length:
-        distance = (control.bone.head_local - followed.bone.head_local).length
-        matrix.translation = joint + bend.normalized() * distance
-    else:  # a straight limb has no bend side: where the parent puts it at rest
-        matrix.translation = (parent.matrix @ parent.bone.matrix_local.inverted() @ control.bone.matrix_local).translation
+    axis = end - root
+    bend = (joint - root) - (joint - root).project(axis)
+    # The side the joint bends naturally: where the pole is at rest, seen from the joint, carried by the parent and
+    # square to it (the side a straight limb would bend to)
+    rest_offset = control.bone.head_local - followed.bone.head_local
+    rest_side = parent.matrix.to_3x3() @ (parent.bone.matrix_local.to_3x3().inverted() @ rest_offset)
+    rest_side -= rest_side.project(joint - root)
+    rest_side -= rest_side.project(axis)
+    if rest_side.length < 1e-9 or axis.length < 1e-9:
+        matrix.translation = (parent.matrix @ parent.bone.matrix_local.inverted()
+                              @ control.bone.matrix_local).translation
+        return matrix
+    # A nearly straight limb has no reliable bend side, and the IK chain still bends a little (Rigify's IK stretch):
+    # below POLE_STRAIGHT of the limb's length, the pole goes back to its rest side, gradually on that side, at once
+    # on the other (a knee a little overextended would flip it, and the IK knee with it)
+    small = POLE_STRAIGHT * axis.length
+    if bend.length >= small:
+        weight = 1.0
+    else:
+        weight = bend.length / small if bend.dot(rest_side) > 0.0 else 0.0
+    direction = bend.normalized() * weight + rest_side.normalized() * (1.0 - weight)
+    if direction.length < 1e-9:
+        direction = rest_side
+    distance = (control.bone.head_local - followed.bone.head_local).length
+    matrix.translation = joint + direction.normalized() * distance
     return matrix
 
 

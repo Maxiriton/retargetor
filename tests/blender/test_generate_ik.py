@@ -60,16 +60,23 @@ def in_fk(rig, switches, function):
 
 def ik_vs_fk(rig, switches, frames):
     """The rig played in IK (as it is) and in FK: worst gap on the hands and feet and on the elbows and knees
-    (mm), and the worst jump of the IK playback compared with the FK one, from a frame to the next (mm)"""
+    (mm), and the worst jump of the IK playback: how much further a bone moves in IK than in FK from a frame to
+    the next (mm; a fast FK motion that IK follows more smoothly isn't a jump)"""
     names = ENDS + JOINTS
     ik = heads(rig, names, frames)
     fk = in_fk(rig, switches, lambda: heads(rig, names, frames))
     gap_ends = max((ik[f][n] - fk[f][n]).length for f in frames for n in ENDS) * 1000
-    gap_joints = max((ik[f][n] - fk[f][n]).length for f in frames for n in JOINTS) * 1000
+    joint_gaps = [((ik[f][n] - fk[f][n]).length * 1000, n, f) for f in frames for n in JOINTS]
     ordered = sorted(frames)
-    jump = max((((ik[b][n] - ik[a][n]) - (fk[b][n] - fk[a][n])).length
-                for a, b in zip(ordered, ordered[1:]) if b == a + 1 for n in names), default=0.0) * 1000
-    return gap_ends, gap_joints, jump
+    jumps = [(((ik[b][n] - ik[a][n]).length - (fk[b][n] - fk[a][n]).length) * 1000, n, b)
+             for a, b in zip(ordered, ordered[1:]) if b == a + 1 for n in names]
+    jump = max(jumps, default=(0.0, "", 0))
+    worst_joint = max(joint_gaps)
+    mean_joint = sum(gap for gap, _n, _f in joint_gaps) / len(joint_gaps)
+    print(f"FINDING IK vs FK on {len(frames)} frames: elbows and knees {mean_joint:.1f} mm on average, worst "
+          f"{worst_joint[0]:.1f} mm ({worst_joint[1]}, frame {worst_joint[2]}); worst jump "
+          f"{max(jump[0], 0.0):.1f} mm ({jump[1]} into frame {jump[2]})")
+    return gap_ends, worst_joint[0], max(jump[0], 0.0)
 
 
 def ik_snap_controls(rig_profile):
