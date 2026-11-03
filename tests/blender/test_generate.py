@@ -352,32 +352,51 @@ def main():
     state.range_mode = 'KEY_POSES'
 
     # 3. An arm in IK (its IK controls at rest): its FK controls are snapped to the IK pose on the key poses,
-    # then it is switched to FK (the switch isn't animated: set once)
+    # it is in FK while generating, then its IK controls are snapped to the motion and it is back in IK (the switch
+    # isn't animated: set once). tests/blender/test_generate_ik.py checks the IK snap on a real IK pose.
     switch = rig.pose.bones["upper_arm_parent.L"]
     switch["IK_FK"] = 0.0
     rig.update_tag()
     arm = ["ORG-upper_arm.L", "ORG-forearm.L", "ORG-hand.L"]
     key_frames = [1, 61, 90, 120]
     ik_pose = snapshot(rig, arm, key_frames)
+
+    def in_fk(function):
+        switch["IK_FK"] = 1.0
+        rig.update_tag()
+        try:
+            return function()
+        finally:
+            switch["IK_FK"] = 0.0
+            rig.update_tag()
+
     checks.check(run_operator() == {'FINISHED'}, "generated with an arm in IK")
-    checks.check(switch["IK_FK"] == 1.0, "the arm is switched to FK")
+    checks.check(switch["IK_FK"] == 0.0, "the arm is back in IK")
     # Frame 90 keys the head alone: the body is generated there (the interpolation goes through the pose read
     # there, within 0.02 degrees after the round trip through the spine's read-only roles)
-    angle, _dist = worst_change(rig, {f: bones for f, bones in ik_pose.items() if f != 90})
-    checks.below(angle, 0.01, "the arm keeps its IK pose on the whole key poses, worst direction (deg)")
-    angle, _dist = worst_change(rig, {90: ik_pose[90]})
-    checks.below(angle, 0.05, "the arm keeps its IK pose on frame 90, where the body is generated (deg)")
+    angle, _dist = in_fk(lambda: worst_change(rig, {f: bones for f, bones in ik_pose.items() if f != 90}))
+    checks.below(angle, 0.01, "the FK arm takes the IK pose on the whole key poses, worst direction (deg)")
+    angle, _dist = in_fk(lambda: worst_change(rig, {90: ik_pose[90]}))
+    checks.below(angle, 0.05, "the FK arm takes the IK pose on frame 90, where the body is generated (deg)")
     # The IK hand stays at rest while the character walks away: Rigify's IK stretches the arm (by a metre), which
-    # the FK chain doesn't. Only the shoulder joint keeps its place; tests/blender/test_generate_ik.py checks a
-    # real IK pose.
-    _angle, dist = worst_change(rig, {f: {"ORG-upper_arm.L": bones["ORG-upper_arm.L"]} for f, bones in ik_pose.items()})
+    # the FK chain doesn't. Only the shoulder joint keeps its place.
+    _angle, dist = in_fk(lambda: worst_change(
+        rig, {f: {"ORG-upper_arm.L": bones["ORG-upper_arm.L"]} for f, bones in ik_pose.items()}))
     checks.below(dist, 0.01, "the shoulder joint stays in place on the key poses (cm)")
+    # In IK the key poses keep the IK controls as they were (keyed there as user keys), and the hand follows the
+    # FK motion between them
+    angle, dist = worst_change(rig, ik_pose)
+    checks.below(angle + dist, 1e-3, "in IK, the key poses are as they were")
     after_keys = keys_by_type(rig, generation)
+    hand_keys = after_keys[('pose.bones["hand_ik.L"].location', 0)]
+    checks.check({f for f, (_v, t) in hand_keys.items() if t == 'KEYFRAME'} == set(key_frames)
+                 and {f for f, (_v, t) in hand_keys.items() if t == 'GENERATED'} == set(range(1, 121)) - set(key_frames),
+                 "the IK hand keyed as it was on the key poses, generated between them")
     snapped = after_keys[('pose.bones["forearm_fk.L"].rotation_quaternion', 0)]
     checks.check(all(snapped[f][1] == 'KEYFRAME' for f in key_frames), "the snapped FK keys are user keys")
     checks.check(quaternion_flips(rig, generation, controls) == 0, "quaternion signs still continuous")
 
-    # The switch animated, in IK on a key pose: snapped there, keyed in FK on the key poses and the range's ends
+    # The switch animated, in IK on a key pose: snapped there, its keys put back as they were
     switch["IK_FK"] = 1.0
     switch.keyframe_insert('["IK_FK"]', frame=1)
     switch["IK_FK"] = 0.0
@@ -385,11 +404,17 @@ def main():
     switch["IK_FK"] = 1.0
     switch.keyframe_insert('["IK_FK"]', frame=120)
     rig.update_tag()
+    fcurve = generation.channelbag(rig).fcurves.find('pose.bones["upper_arm_parent.L"]["IK_FK"]')
+    switch_keys = [(tuple(p.co), p.type) for p in fcurve.keyframe_points]
     checks.check(run_operator() == {'FINISHED'}, "generated with the switch going to IK on a key pose")
     fcurve = generation.channelbag(rig).fcurves.find('pose.bones["upper_arm_parent.L"]["IK_FK"]')
-    checks.check(all(abs(fcurve.evaluate(f) - 1.0) < 1e-6 for f in range(1, 121)), "the switch is FK on the range")
+    checks.check([(tuple(p.co), p.type) for p in fcurve.keyframe_points] == switch_keys and not fcurve.mute,
+                 "the switch's keys are put back as they were")
 
-    # The switch going to IK between two key poses: refused, the rig untouched
+    # The switch going to IK between two key poses, on a limb without IK snap: refused, the rig untouched (with an
+    # IK snap, the limb plays the motion in IK and FK alike: see test_generate_ik.py)
+    rig.data.retargetor_profile.limbs[0].ik_snap.clear()
+    rig_profile = rig.data.retargetor_profile.to_core()
     switch["IK_FK"] = 0.0
     switch.keyframe_insert('["IK_FK"]', frame=100)
     keys_before = keys_by_type(rig, generation)

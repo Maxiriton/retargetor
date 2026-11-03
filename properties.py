@@ -187,6 +187,21 @@ class RTGTR_BoneRef(PropertyGroup):
     bone: StringProperty(name="Bone", override=OVERRIDABLE)
 
 
+ik_snap_mode_items = (
+    (core_profile.IK_FOLLOW, "Follow", "Takes the followed bone's transform, with the offset of their rest poses"),
+    (core_profile.IK_POLE, "Pole", "Pole target: placed in the plane of the followed bone and its parent, on the "
+                                   "side the joint bends"),
+    (core_profile.IK_REST, "Rest", "Reset to its rest pose"),
+)
+
+
+class RTGTR_IkSnap(PropertyGroup):
+    ik_control: StringProperty(name="IK Control", override=OVERRIDABLE)
+    followed_bone: StringProperty(name="Followed Bone", description="Bone the IK control is snapped to",
+                                  override=OVERRIDABLE)
+    mode: EnumProperty(name="Mode", items=ik_snap_mode_items, default=core_profile.IK_FOLLOW, override=OVERRIDABLE)
+
+
 class RTGTR_LimbSnap(PropertyGroup):
     """How to snap one limb's FK controls to its IK pose and switch it to FK"""
     name: StringProperty(name="Limb", override=OVERRIDABLE)
@@ -199,6 +214,8 @@ class RTGTR_LimbSnap(PropertyGroup):
     controls: CollectionProperty(type=RTGTR_FkPair, override=OVERRIDABLE_COLLECTION)
     ik_controls: CollectionProperty(type=RTGTR_BoneRef, override=OVERRIDABLE_COLLECTION,
                                     description="Controls posing the limb in IK: their keys make key poses")
+    ik_snap: CollectionProperty(type=RTGTR_IkSnap, override=OVERRIDABLE_COLLECTION,
+                                description="How the IK controls are snapped to the generated FK motion, in order")
 
 
 class RTGTR_RigProfile(PropertyGroup):
@@ -228,6 +245,8 @@ class RTGTR_RigProfile(PropertyGroup):
                 fk_value=limb.fk_value,
                 controls=[core_profile.FkPair(p.fk_control, p.followed_bone) for p in limb.controls],
                 ik_controls=[ref.bone for ref in limb.ik_controls if ref.bone],
+                ik_snap=[core_profile.IkSnap(s.ik_control, s.followed_bone, s.mode)
+                         for s in limb.ik_snap if s.ik_control],
             ))
         return result
 
@@ -260,6 +279,11 @@ class RTGTR_RigProfile(PropertyGroup):
                 control.followed_bone = pair.followed_bone
             for name in limb.ik_controls:
                 item.ik_controls.add().bone = name
+            for snap in limb.ik_snap:
+                entry = item.ik_snap.add()
+                entry.ik_control = snap.ik_control
+                entry.followed_bone = snap.followed_bone
+                entry.mode = snap.mode
 
 
 classes = (
@@ -269,6 +293,7 @@ classes = (
     RTGTR_RoleBinding,
     RTGTR_FkPair,
     RTGTR_BoneRef,
+    RTGTR_IkSnap,
     RTGTR_LimbSnap,
     RTGTR_RigProfile,
 )

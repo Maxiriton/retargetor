@@ -50,15 +50,44 @@ class FkPair:
     followed_bone: str
 
 
+# How an IK control is snapped to the limb's FK pose (IkSnap.mode)
+IK_FOLLOW = "FOLLOW"  # takes the followed bone's transform, with the offset their rest poses have
+IK_POLE = "POLE"      # a pole target, in the plane of the followed bone and its parent
+IK_REST = "REST"      # reset to its rest pose
+IK_SNAP_MODES = (IK_FOLLOW, IK_POLE, IK_REST)
+
+
+@dataclass
+class IkSnap:
+    """How one IK control is snapped to its limb's FK pose (after a generation, so the limb plays in IK).
+
+    FOLLOW: the control takes the followed bone's transform, with the offset their rest poses have (Rigify:
+    "hand_ik.L" follows "ORG-hand.L"). Locked channels stay as they are.
+    POLE: a pole target, placed in the plane of the followed bone and its parent, on the side the joint bends, at
+    the distance it has at rest from the followed bone's head (Rigify: "upper_arm_ik_target.L", "ORG-forearm.L").
+    REST: the control is reset to its rest pose (Rigify: "foot_heel_ik.L"); no followed bone.
+    """
+    ik_control: str
+    followed_bone: str = ""
+    mode: str = IK_FOLLOW
+
+    def __post_init__(self):
+        if self.mode not in IK_SNAP_MODES:
+            raise ValueError(f"Unknown IK snap mode '{self.mode}' for '{self.ik_control}' "
+                             f"(expected one of {', '.join(IK_SNAP_MODES)}).")
+
+
 @dataclass
 class LimbSnap:
-    """How to snap one limb's FK controls to its current (IK) pose and switch it to FK.
+    """How to snap one limb's FK controls to its current (IK) pose and switch it to FK, and back.
 
     switch_bone / switch_property: the custom property that switches IK/FK (Rigify: "upper_arm_parent.L", "IK_FK").
     fk_value: the value of that property in FK (Rigify: 1.0).
     controls: the FK controls, parents first.
     ik_controls: the controls posing the limb in IK (Rigify: "hand_ik.L", "upper_arm_ik_target.L"...): a user key
     on one of them makes a key pose, like a key on a write control.
+    ik_snap: how the IK controls are snapped to the FK pose, in order (a control placed after the ones it depends
+    on). Empty: the limb isn't snapped back to IK, it plays in FK after a generation.
     """
     name: str
     switch_bone: str = ""
@@ -66,6 +95,7 @@ class LimbSnap:
     fk_value: float = 1.0
     controls: list[FkPair] = field(default_factory=list)
     ik_controls: list[str] = field(default_factory=list)
+    ik_snap: list[IkSnap] = field(default_factory=list)
 
 
 @dataclass
@@ -103,6 +133,7 @@ class RigProfile:
                     "fk_value": limb.fk_value,
                     "controls": [[p.fk_control, p.followed_bone] for p in limb.controls],
                     "ik_controls": list(limb.ik_controls),
+                    "ik_snap": [[s.ik_control, s.followed_bone, s.mode] for s in limb.ik_snap],
                 }
                 for limb in self.limbs
             ],
@@ -141,6 +172,12 @@ class RigProfile:
                 raise ValueError(str(e.args[0])) from e
 
         for entry in data.get("limbs", []):
+            ik_snap = []
+            for item in entry.get("ik_snap", []):
+                if not isinstance(item, (list, tuple)) or len(item) != 3:
+                    raise ValueError(f"An IK snap entry of the limb '{entry.get('name', '')}' must be "
+                                     "[IK control, followed bone, mode].")
+                ik_snap.append(IkSnap(str(item[0]), str(item[1]), str(item[2])))
             profile.limbs.append(LimbSnap(
                 name=entry.get("name", ""),
                 switch_bone=entry.get("switch_bone", ""),
@@ -148,6 +185,7 @@ class RigProfile:
                 fk_value=float(entry.get("fk_value", 1.0)),
                 controls=[FkPair(fk, followed) for fk, followed in entry.get("controls", [])],
                 ik_controls=[str(name) for name in entry.get("ik_controls", [])],
+                ik_snap=ik_snap,
             ))
         return profile
 

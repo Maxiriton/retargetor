@@ -336,22 +336,37 @@ def run_ik(checks, kimodo_python, out_dir):
     rig = setup(kimodo_python)
     keys = [1, 61, 120]
     before = motion_snapshot(rig, keys)
-    switches = [rig.pose.bones[limb.switch_bone] for limb in rig.data.retargetor_profile.to_core().limbs]
-    checks.check(all(s["IK_FK"] == 0.0 for s in switches), "every limb starts in IK")
+    from test_generate_ik import ik_vs_fk, in_fk
+    switches = {limb.name: rig.pose.bones[limb.switch_bone] for limb in rig.data.retargetor_profile.to_core().limbs}
+    checks.check(all(s["IK_FK"] == 0.0 for s in switches.values()), "every limb starts in IK")
     task = generate(checks, "IK limbs, first generation (starts Kimodo)")
     print("FINDING " + "; ".join(task.notes))
-    checks.check(all(s["IK_FK"] == 1.0 for s in switches), "every limb switched to FK")
-    after = motion_snapshot(rig, keys)
+    checks.check(all(s["IK_FK"] == 0.0 for s in switches.values()), "every limb back in IK")
+    after = in_fk(rig, switches, lambda: motion_snapshot(rig, keys))
     _ma, worst_angle, _md, worst_dist = compare(before, after, [(f, f) for f in keys])
-    checks.below(worst_angle, 0.05, "IK pose kept on the key poses, worst direction (deg)")
-    checks.below(worst_dist, 1.0, "IK pose kept on the key poses, worst head (cm, Rigify's IK stretch)")
-    check_follows_model(checks, rig, range(1, 121), "IK limbs")
+    checks.below(worst_angle, 0.05, "the FK controls take the IK pose on the key poses, worst direction (deg)")
+    checks.below(worst_dist, 1.0, "the FK controls take the IK pose on the key poses, worst head (cm, Rigify's IK "
+                                  "stretch)")
+    key_poses_kept(checks, rig, before, "IK limbs, in IK")
+    in_fk(rig, switches, lambda: check_follows_model(checks, rig, range(1, 121), "IK limbs, in FK"))
     # The IK key poses are the FK ones up to Rigify's IK stretch (up to 2.7 degrees on the elbows)
     base = load_snapshot(os.path.join(out_dir, "base.json"))
-    mean_a, worst_a, mean_d, worst_d = compare(base, motion_snapshot(rig, range(1, 121)), [(f, f) for f in range(1, 121)])
+    generated = in_fk(rig, switches, lambda: motion_snapshot(rig, range(1, 121)))
+    mean_a, worst_a, mean_d, worst_d = compare(base, generated, [(f, f) for f in range(1, 121)])
     print(f"FINDING IK limbs vs base (FK key poses): directions mean {mean_a:.2f} deg, worst {worst_a:.1f} deg; "
           f"heads mean {mean_d:.1f} cm, worst {worst_d:.1f} cm")
     checks.below(mean_a, 5.0, "IK limbs: close to the base result, mean direction (deg)")
+    # Played in IK: the IK controls follow the generated motion
+    between = [f for f in range(1, 121) if f not in keys]
+    keyed_ends, _joints, _jump = ik_vs_fk(rig, switches, keys)
+    gap_ends, gap_joints, _jump = ik_vs_fk(rig, switches, between)
+    _ends, _joints, jump = ik_vs_fk(rig, switches, list(range(1, 121)))
+    print(f"FINDING IK limbs played in IK vs FK: on the key poses hands and feet {keyed_ends:.1f} mm; between them "
+          f"hands and feet {gap_ends:.1f} mm, elbows and knees {gap_joints:.1f} mm; worst jump {jump:.1f} mm")
+    checks.below(gap_ends, keyed_ends + 0.5, "in IK, the hands and feet follow the motion, up to the gap of the key "
+                                             "poses (mm)")
+    checks.below(gap_joints, 30.0, "in IK, the elbows and knees follow the motion (mm)")
+    checks.below(jump, 5.0, "no jump playing in IK, compared with FK (mm)")
 
 
 def arm_key_values(rig, frame=90):

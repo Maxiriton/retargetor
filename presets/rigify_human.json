@@ -212,6 +212,23 @@
                 "upper_arm_ik.L",
                 "hand_ik.L",
                 "upper_arm_ik_target.L"
+            ],
+            "ik_snap": [
+                [
+                    "hand_ik.L",
+                    "ORG-hand.L",
+                    "FOLLOW"
+                ],
+                [
+                    "upper_arm_ik_target.L",
+                    "ORG-forearm.L",
+                    "POLE"
+                ],
+                [
+                    "upper_arm_ik.L",
+                    "ORG-upper_arm.L",
+                    "FOLLOW"
+                ]
             ]
         },
         {
@@ -237,6 +254,23 @@
                 "upper_arm_ik.R",
                 "hand_ik.R",
                 "upper_arm_ik_target.R"
+            ],
+            "ik_snap": [
+                [
+                    "hand_ik.R",
+                    "ORG-hand.R",
+                    "FOLLOW"
+                ],
+                [
+                    "upper_arm_ik_target.R",
+                    "ORG-forearm.R",
+                    "POLE"
+                ],
+                [
+                    "upper_arm_ik.R",
+                    "ORG-upper_arm.R",
+                    "FOLLOW"
+                ]
             ]
         },
         {
@@ -269,6 +303,38 @@
                 "toe_ik.L",
                 "foot_heel_ik.L",
                 "foot_spin_ik.L"
+            ],
+            "ik_snap": [
+                [
+                    "foot_heel_ik.L",
+                    "",
+                    "REST"
+                ],
+                [
+                    "foot_spin_ik.L",
+                    "",
+                    "REST"
+                ],
+                [
+                    "foot_ik.L",
+                    "ORG-foot.L",
+                    "FOLLOW"
+                ],
+                [
+                    "toe_ik.L",
+                    "ORG-toe.L",
+                    "FOLLOW"
+                ],
+                [
+                    "thigh_ik_target.L",
+                    "ORG-shin.L",
+                    "POLE"
+                ],
+                [
+                    "thigh_ik.L",
+                    "ORG-thigh.L",
+                    "FOLLOW"
+                ]
             ]
         },
         {
@@ -301,6 +367,38 @@
                 "toe_ik.R",
                 "foot_heel_ik.R",
                 "foot_spin_ik.R"
+            ],
+            "ik_snap": [
+                [
+                    "foot_heel_ik.R",
+                    "",
+                    "REST"
+                ],
+                [
+                    "foot_spin_ik.R",
+                    "",
+                    "REST"
+                ],
+                [
+                    "foot_ik.R",
+                    "ORG-foot.R",
+                    "FOLLOW"
+                ],
+                [
+                    "toe_ik.R",
+                    "ORG-toe.R",
+                    "FOLLOW"
+                ],
+                [
+                    "thigh_ik_target.R",
+                    "ORG-shin.R",
+                    "POLE"
+                ],
+                [
+                    "thigh_ik.R",
+                    "ORG-thigh.R",
+                    "FOLLOW"
+                ]
             ]
         }
     ]

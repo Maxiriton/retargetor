@@ -17,7 +17,7 @@ from .backends import process, protocol, registry
 from .core import profile as core_profile
 from .core.motion import GenerationRequest
 from .core.pose_io import read_pose, write_motion_fcurves
-from .core.retarget.fk_snap import set_limbs_fk, snap_fk_keys
+from .core.retarget.fk_snap import ik_offsets, key_ik_controls, set_limbs_fk, snap_fk_keys, snap_ik_keys
 from .core.retarget.snap import Retargeter, compute_translation_scale
 from .core.skeleton import Skeleton
 from .core.skeleton_io import armature_backend, armature_skeleton, build_armature
@@ -86,8 +86,9 @@ def _switch_fcurve(rig, limb):
 
 def limbs_in_ik(rig, rig_profile, start, end, key_frames):
     """The limbs of the profile in IK somewhere between start and end: ({key frame: limbs in IK on it},
-    every limb in IK on the range). Raises ValueError if a limb's IK/FK switch has a key in IK inside the
-    range, off the key poses: switching the limb to FK on the key poses and the range's ends wouldn't cover it."""
+    every limb in IK on the range). Raises ValueError if the IK/FK switch of a limb without IK snap has a key in
+    IK inside the range, off the key poses: switching the limb to FK on the key poses and the range's ends wouldn't
+    cover it (a limb with an IK snap plays the generated motion in IK and FK alike)."""
     by_frame = {}
     in_ik = []
     for limb in rig_profile.limbs:
@@ -103,7 +104,7 @@ def limbs_in_ik(rig, rig_profile, start, end, key_frames):
             values = dict.fromkeys(range(start, end + 1), float(switch[limb.switch_property]))
         if all(abs(value - limb.fk_value) <= 1e-3 for value in values.values()):
             continue
-        if fcurve is not None:
+        if fcurve is not None and not limb.ik_snap:
             stray = [round(p.co.x) for p in fcurve.keyframe_points
                      if start < p.co.x < end and round(p.co.x) not in key_frames
                      and abs(p.co.y - limb.fk_value) > 1e-3]
@@ -120,10 +121,74 @@ def limbs_in_ik(rig, rig_profile, start, end, key_frames):
 
 def snap_limbs_to_fk(context, rig, by_frame, in_ik, start, end):
     """Snap the FK controls of the limbs in IK to their IK pose on the key frames (user keys, type Keyframe),
-    then switch the limbs to FK on the range. The user's IK keys are kept."""
+    then switch the limbs to FK. The user's IK keys are kept.
+    A limb with an IK snap is in FK only while generating (its switch's animation muted, restore_switches puts it
+    back): on the key frames its IK controls are keyed as they are (type Keyframe, where they have no user key), so
+    its IK pose there stays the user's when the IK controls are snapped to the motion. A limb without IK snap is
+    switched for good: an animated switch is keyed in FK on the key frames and the range's ends."""
     scene, view_layer = context.scene, context.view_layer
     snap_fk_keys(rig, by_frame, scene, view_layer)
-    set_limbs_fk(rig, in_ik, view_layer, frames=sorted(set(by_frame) | {start, end}))
+    original_frame = scene.frame_current
+    try:
+        for frame in sorted(by_frame):
+            limbs = [limb for limb in by_frame[frame] if limb.ik_snap]
+            if limbs:
+                scene.frame_set(frame)
+                key_ik_controls(rig, limbs, frame, 'KEYFRAME', user_keys=True)
+    finally:
+        scene.frame_set(original_frame)
+    synced = [limb for limb in in_ik if limb.ik_snap]
+    for limb in synced:
+        fcurve = _switch_fcurve(rig, limb)
+        if fcurve is not None:
+            fcurve.mute = True
+    set_limbs_fk(rig, synced, view_layer)
+    set_limbs_fk(rig, [limb for limb in in_ik if not limb.ik_snap], view_layer,
+                 frames=sorted(set(by_frame) | {start, end}))
+
+
+def save_switches(rig, limbs):
+    """The IK/FK switches of the limbs as they are, for restore_switches: [(limb, value, keys, muted)]. keys: the
+    keyframes of the switch's F-curve, None if it isn't animated."""
+    saved = []
+    for limb in limbs:
+        value = float(rig.pose.bones[limb.switch_bone][limb.switch_property])
+        fcurve = _switch_fcurve(rig, limb)
+        keys, muted = None, False
+        if fcurve is not None:
+            keys = [(tuple(p.co), p.type, p.interpolation, p.easing, p.handle_left_type, p.handle_right_type,
+                     tuple(p.handle_left), tuple(p.handle_right)) for p in fcurve.keyframe_points]
+            muted = fcurve.mute
+        saved.append((limb, value, keys, muted))
+    return saved
+
+
+def restore_switches(rig, saved, view_layer):
+    """Put the IK/FK switches back as save_switches found them: value, keys, mute"""
+    for limb, value, keys, muted in saved:
+        switch = rig.pose.bones.get(limb.switch_bone)
+        if switch is None:
+            continue
+        switch[limb.switch_property] = value
+        fcurve = _switch_fcurve(rig, limb)
+        if fcurve is None or keys is None:
+            continue
+        points = fcurve.keyframe_points
+        points.clear()
+        points.add(len(keys))
+        for point, (co, keytype, interpolation, easing, left_type, right_type, left, right) in zip(points, keys):
+            point.co = co
+            point.type = keytype
+            point.interpolation = interpolation
+            point.easing = easing
+            point.handle_left_type = left_type
+            point.handle_right_type = right_type
+            point.handle_left = left
+            point.handle_right = right
+        fcurve.mute = muted
+        fcurve.update()
+    rig.update_tag()
+    view_layer.update()
 
 
 def user_keys_by_bone(rig, bones):
@@ -399,7 +464,101 @@ class MotionWriter:
             self.done += len(chunk)
         if self.finished:
             fix_quaternion_signs(self.rig, self.controls)
-            generated_keys.record(self.rig)
+            return True
+        return False
+
+
+def blend_offsets(before, after, t):
+    """{control: matrix} between two ik_offsets results, t from 0 (before) to 1 (after): locations lerped,
+    rotations slerped (scales kept from `before`)"""
+    result = {}
+    for control, first in before.items():
+        second = after.get(control, first)
+        loc_a, rot_a, scale = first.decompose()
+        loc_b, rot_b, _scale = second.decompose()
+        result[control] = Matrix.LocRotScale(loc_a.lerp(loc_b, t), rot_a.slerp(rot_b, t), scale)
+    return result
+
+
+class IkSnapWriter:
+    """Snaps the IK controls of the limbs (LimbSnap.ik_snap) to the generated FK motion on every frame from start
+    to end, in several steps like MotionWriter (one evaluation of the rig per frame), as GENERATED keys: the limbs
+    play the motion in IK. The limbs must be in FK meanwhile. A limb is left alone on the frames where one of its
+    IK controls has a user key (its IK pose there is the user's). How far the user's IK pose is from the FK one on
+    those frames (Rigify's IK chain is a little shorter) is blended from one to the next, so the IK motion doesn't
+    jump there. The GENERATED keys of the IK controls in the range are removed when the writer is made.
+    step() until it returns True."""
+
+    def __init__(self, rig, limbs, start, end):
+        self.rig = rig
+        self.limbs = limbs
+        self.controls = [snap.ik_control for limb in limbs for snap in limb.ik_snap]
+        self.removed = remove_generated_keys(rig, self.controls, start, end)
+        keys = user_keys_by_bone(rig, set(self.controls) | {n for limb in limbs for n in limb.ik_controls})
+        self.by_frame = {}
+        self.keyed = {}  # {limb name: frames where the limb has user IK keys, in the range}
+        for limb in limbs:
+            names = {s.ik_control for s in limb.ik_snap} | set(limb.ik_controls)
+            keyed = set().union(*(keys[name] for name in names))
+            self.keyed[limb.name] = sorted(f for f in keyed if start <= f <= end)
+            for frame in range(start, end + 1):
+                if frame not in keyed:
+                    self.by_frame.setdefault(frame, []).append(limb)
+        self.frames = sorted(self.by_frame)
+        self.corrections = None  # {frame: {control: matrix}}, from the offsets on the keyed frames (first step)
+        self.done = 0
+        self._previous = {}
+        self._chunk = 2
+
+    def _measure_offsets(self, context):
+        """The offsets of the user's IK pose on the keyed frames, blended on the frames to write"""
+        scene = context.scene
+        original_frame = scene.frame_current
+        offsets = {}  # {limb name: {frame: {control: matrix}}}
+        try:
+            for limb in self.limbs:
+                for frame in self.keyed[limb.name]:
+                    scene.frame_set(frame)
+                    offsets.setdefault(limb.name, {})[frame] = ik_offsets(self.rig, [limb])
+        finally:
+            scene.frame_set(original_frame)
+        self.corrections = {}
+        for frame, limbs in self.by_frame.items():
+            for limb in limbs:
+                measured = offsets.get(limb.name)
+                if not measured:
+                    continue
+                frames = sorted(measured)
+                before = max((f for f in frames if f < frame), default=None)
+                after = min((f for f in frames if f > frame), default=None)
+                if before is None or after is None:  # outside the keyed frames: the nearest offset, held
+                    blended = measured[after if before is None else before]
+                else:
+                    blended = blend_offsets(measured[before], measured[after], (frame - before) / (after - before))
+                self.corrections.setdefault(frame, {}).update(blended)
+
+    @property
+    def fraction(self):
+        return self.done / len(self.frames) if self.frames else 1.0
+
+    @property
+    def finished(self):
+        return self.done >= len(self.frames)
+
+    def step(self, context, budget=0.1):
+        """Snap the next frames, about `budget` seconds of work. Returns True once every frame is done."""
+        if not self.finished:
+            chunk = self.frames[self.done:self.done + self._chunk]
+            begin = time.perf_counter()
+            if self.corrections is None:
+                self._measure_offsets(context)
+            snap_ik_keys(self.rig, {frame: self.by_frame[frame] for frame in chunk}, context.scene,
+                         context.view_layer, GENERATED, self._previous, self.corrections)
+            per_frame = (time.perf_counter() - begin) / len(chunk)
+            self._chunk = max(1, min(100, int(budget / max(per_frame, 1e-4))))
+            self.done += len(chunk)
+        if self.finished:
+            fix_quaternion_signs(self.rig, self.controls)
             return True
         return False
 
@@ -438,6 +597,9 @@ class GenerationTask:
         self.result = None  # (frames written, keys removed) once finished
         self.notes = []  # what was done to the rig besides the generated keys (FK snap...)
         self.writer = None
+        self.ik_writer = None
+        self.switches = []  # the IK/FK switches of the limbs in IK, as the user left them (save_switches)
+        self.synced = []  # the limbs in IK snapped back to IK after the generation (they have an IK snap)
         self.request = None  # the GenerationRequest sent
         self.partial = False
         self.cancel_requested = False
@@ -451,7 +613,10 @@ class GenerationTask:
         if self.stage == FINISHED:
             return 1.0
         if self.stage == WRITING:
-            return GENERATION_SHARE + (1.0 - GENERATION_SHARE) * self.writer.fraction
+            done, total = self.writer.done, len(self.writer.frames)
+            if self.ik_writer is not None:
+                done, total = done + self.ik_writer.done, total + len(self.ik_writer.frames)
+            return GENERATION_SHARE + (1.0 - GENERATION_SHARE) * (done / total if total else 1.0)
         if self.stage == GENERATING and self.job is not None:
             return GENERATION_SHARE * self.job.fraction
         return 0.0
@@ -461,6 +626,8 @@ class GenerationTask:
         if self.stage == SKELETON:
             return f"Starting {self.backend.label}"
         if self.stage == WRITING:
+            if self.writer.finished and self.ik_writer is not None:
+                return f"Snapping IK {self.ik_writer.done}/{len(self.ik_writer.frames)}"
             return f"Writing keys {self.writer.done}/{len(self.writer.frames)}"
         if self.job is not None and self.job.message:
             return self.job.message
@@ -503,10 +670,15 @@ class GenerationTask:
         self.worker = registry.worker_for(self.backend, backend_settings(context, self.backend))
         if in_ik:
             # Before anything else changes the rig: the generated motion is written to the FK controls
+            self.switches = save_switches(rig, in_ik)
+            self.synced = [limb for limb in in_ik if limb.ik_snap]
             snap_limbs_to_fk(context, rig, snaps, in_ik, self.start_frame, self.end_frame)
             self.modified = True
-            self.notes.append(f"{', '.join(limb.name for limb in in_ik)} switched to FK, "
-                              f"FK snapped to IK on {len(snaps)} key poses")
+            self.notes.append(f"FK snapped to IK on {len(snaps)} key poses ({', '.join(l.name for l in in_ik)})")
+            unsynced = [limb.name for limb in in_ik if not limb.ik_snap]
+            if unsynced:
+                self.notes.append(f"{', '.join(unsynced)} switched to FK: the rig profile has no IK snap for "
+                                  "them, so their IK controls can't follow the generated motion")
         model = model_armature(context, rig, self.backend)
         if model is None:
             self.stage = SKELETON
@@ -587,15 +759,29 @@ class GenerationTask:
             self.worker.forget(self.job)
             self.writer = MotionWriter(context, rig, model, self.backend, self.rig_profile, motion,
                                        self.start_frame, self.end_frame, self.translation_scale)
+            if self.synced:
+                self.ik_writer = IkSnapWriter(rig, self.synced, self.start_frame, self.end_frame)
             self.stage = WRITING
             return False
         return True
 
     def _write(self, context, budget):
-        self._rig()
-        if not self.writer.step(context, budget):
-            return False
-        self.timings["writing"] = time.perf_counter() - self._write_started
+        rig = self._rig()
+        if not self.writer.finished or self.ik_writer is None:
+            if not self.writer.step(context, budget):
+                return False
+            self.timings["writing"] = time.perf_counter() - self._write_started
+            if self.ik_writer is not None:
+                self._write_started = time.perf_counter()
+                return False
+        if self.ik_writer is not None:
+            if not self.ik_writer.step(context, budget):
+                return False
+            self.timings["IK snap"] = time.perf_counter() - self._write_started
+            restore_switches(rig, [saved for saved in self.switches if saved[0].ik_snap], context.view_layer)
+            self.notes.append(f"{', '.join(limb.name for limb in self.synced)}: IK controls snapped to the generated "
+                              "motion, back in IK")
+        generated_keys.record(rig)
         self.errors |= self.writer.errors
         self.result = (len(self.writer.frames), self.writer.removed)
         self.stage = FINISHED
@@ -604,6 +790,14 @@ class GenerationTask:
     def cancel(self):
         if self.cancellable and self.job is not None and self.job.active:
             self.worker.cancel(self.job)
+
+    def abandon(self, context):
+        """After a cancelled or failed generation: the limbs switched to FK go back to the switch the user left
+        (their IK controls were kept)."""
+        rig = bpy.data.objects.get(self.rig_name)
+        if self.switches and rig is not None:
+            restore_switches(rig, self.switches, context.view_layer)
+            self.switches = []
 
     def run(self, context, rig, timeout=None):
         """Run the whole generation, blocking (scripts, tests). Returns False if it was cancelled."""

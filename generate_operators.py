@@ -39,9 +39,10 @@ def _character(context):
     return rig
 
 
-def _cancelled(operator, task):
+def _cancelled(operator, task, context):
     """A cancelled generation. If the rig was already changed (FK snap...), the operator still finishes, so the
     changes are one undo step of their own instead of being merged with the next one."""
+    task.abandon(context)
     if task.modified:
         operator.report({'WARNING'}, "Generation cancelled; the changes made to the rig before it are kept "
                                      "(Ctrl+Z to undo them)")
@@ -50,8 +51,9 @@ def _cancelled(operator, task):
     return {'CANCELLED'}
 
 
-def _failed(operator, task, error):
+def _failed(operator, task, error, context):
     """An error. If the rig was already changed (FK snap...), the operator still finishes: one undo step."""
+    task.abandon(context)
     operator.report({'ERROR'}, str(error.args[0]) if error.args else str(error))
     if task.modified:
         operator.report({'WARNING'}, "The changes made to the rig before the error are kept (Ctrl+Z to undo them)")
@@ -93,9 +95,9 @@ class RTGTR_OT_GenerateInbetweens(Operator):
         task = generation.GenerationTask()
         try:
             if not task.run(context, rig):
-                return _cancelled(self, task)
+                return _cancelled(self, task, context)
         except GENERATION_ERRORS as e:
-            return _failed(self, task, e)
+            return _failed(self, task, e, context)
         _report_result(self, task)
         return {'FINISHED'}
 
@@ -105,7 +107,7 @@ class RTGTR_OT_GenerateInbetweens(Operator):
         try:
             task.start(context, rig)
         except GENERATION_ERRORS as e:
-            return _failed(self, task, e)
+            return _failed(self, task, e, context)
         self._task = task
         generation.current_task = task
         window_manager = context.window_manager
@@ -144,13 +146,13 @@ class RTGTR_OT_GenerateInbetweens(Operator):
             finished = task.update(context)
         except GENERATION_ERRORS as e:
             self._finish(context)
-            return _failed(self, task, e)
+            return _failed(self, task, e, context)
         if not finished:
             self._status(context)
             return {'PASS_THROUGH'}
         self._finish(context)
         if task.cancelled:
-            return _cancelled(self, task)
+            return _cancelled(self, task, context)
         _report_result(self, task)
         return {'FINISHED'}
 

@@ -23,10 +23,10 @@ Retargetor is a Blender extension (Blender 5.2+) that retargets animation betwee
 | `profile_operators.py` | Rig profile: presets, roles, JSON, Snap FK to IK |
 | `ui.py` | Sidebar panels and lists (Retarget, Rig Profile, Generate) |
 | `preferences.py` | Add-on preferences: active backend, developer option, each backend's settings (declared by the backend) |
-| `generation.py` | Generate In-betweens step by step (`GenerationTask`): key poses, model armature, request, result baked as `GENERATED` keys |
+| `generation.py` | Generate In-betweens step by step (`GenerationTask`): key poses, model armature, request, result baked as `GENERATED` keys (`MotionWriter`), IK controls snapped back (`IkSnapWriter`) |
 | `generated_keys.py` | Edited `GENERATED` keys become Keyframes as soon as they are edited: values recorded after each generation, compared by a depsgraph handler |
 | `generate_operators.py` | Generate (modal, Esc cancels; `execute` blocks, for scripts and tests), cancel, start / stop the model |
-| `core/retarget/` | `pairs.py` (`BonePair`, no `bpy`), `snap.py` (`Retargeter`: snap and bake on given frames, offsets computed from the rigs, each bone keyed in its own rotation mode), `fk_snap.py` (FK controls snapped to the IK pose, used automatically before generating) |
+| `core/retarget/` | `pairs.py` (`BonePair`, no `bpy`), `snap.py` (`Retargeter`: snap and bake on given frames, offsets computed from the rigs, each bone keyed in its own rotation mode), `fk_snap.py` (FK controls snapped to the IK pose before generating, IK controls snapped to the generated FK pose after) |
 | `core/roles.py`, `core/profile.py` | Humanoid roles and the rig profile in neutral form, `compose()` (no `bpy`) |
 | `core/motion.py`, `core/pose_io.py` | `Pose` / `Motion` / `GenerationRequest` (no `bpy`), read and written on an armature; `write_motion_fcurves` writes a whole motion in bulk |
 | `core/skeleton.py`, `core/skeleton_io.py` | A backend's skeleton in neutral form (no `bpy`), and the armature built from it |

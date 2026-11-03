@@ -120,6 +120,28 @@ class TestProfile(unittest.TestCase):
         leg = next(limb for limb in self.rigify.limbs if limb.name == "leg.L")
         self.assertEqual((leg.switch_bone, leg.switch_property, leg.fk_value), ("thigh_parent.L", "IK_FK", 1.0))
         self.assertEqual([p.fk_control for p in leg.controls], ["thigh_fk.L", "shin_fk.L", "foot_fk.L", "toe_fk.L"])
+        snaps = {s.ik_control: (s.followed_bone, s.mode) for s in leg.ik_snap}
+        self.assertEqual(snaps["foot_ik.L"], ("ORG-foot.L", profile.IK_FOLLOW))
+        self.assertEqual(snaps["thigh_ik_target.L"], ("ORG-shin.L", profile.IK_POLE))
+        self.assertEqual(snaps["foot_heel_ik.L"], ("", profile.IK_REST))
+        # The heel and the spin are reset before the foot is placed
+        self.assertLess(list(snaps).index("foot_heel_ik.L"), list(snaps).index("foot_ik.L"))
+
+    def test_ik_snap(self):
+        limb = profile.LimbSnap("arm.L", ik_snap=[profile.IkSnap("hand_ik.L", "ORG-hand.L"),
+                                                  profile.IkSnap("pole.L", "ORG-forearm.L", profile.IK_POLE)])
+        data = {"format": profile.PROFILE_FORMAT, "limbs": [{"name": "arm.L", "ik_snap": [["hand_ik.L", "ORG-hand.L", "FOLLOW"],
+                                                                                      ["pole.L", "ORG-forearm.L", "POLE"]]}]}
+        self.assertEqual(profile.RigProfile.from_dict(data).limbs, [limb])
+        self.assertEqual(profile.RigProfile(limbs=[limb]).to_dict()["limbs"][0]["ik_snap"], data["limbs"][0]["ik_snap"])
+        # A profile without the field: no IK snap
+        self.assertEqual(profile.RigProfile.from_dict({"format": profile.PROFILE_FORMAT,
+                                                       "limbs": [{"name": "arm.L"}]}).limbs[0].ik_snap, [])
+        with self.assertRaisesRegex(ValueError, "Unknown IK snap mode"):
+            profile.IkSnap("hand_ik.L", "ORG-hand.L", "PARENT")
+        with self.assertRaisesRegex(ValueError, r"\[IK control, followed bone, mode\]"):
+            profile.RigProfile.from_dict({"format": profile.PROFILE_FORMAT,
+                                          "limbs": [{"name": "arm.L", "ik_snap": [["hand_ik.L", "ORG-hand.L"]]}]})
 
 
 class TestMotion(unittest.TestCase):

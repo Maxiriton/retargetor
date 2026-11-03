@@ -188,6 +188,17 @@ class RETARGETOR_PT_RigProfilePanel(Panel):
                     box.label(text="IK controls (their keys make key poses)")
                     for ref in limb.ik_controls:
                         box.prop_search(ref, "bone", obj.pose, "bones", text="")
+                if len(limb.ik_snap) > 0:
+                    box.label(text="IK snap (after generating, in order)")
+                    for snap in limb.ik_snap:
+                        row = box.row(align=True)
+                        row.prop_search(snap, "ik_control", obj.pose, "bones", text="")
+                        row.prop(snap, "mode", text="")
+                        sub = row.row(align=True)
+                        sub.enabled = snap.mode != 'REST'
+                        sub.prop_search(snap, "followed_bone", obj.pose, "bones", text="")
+                else:
+                    box.label(text="No IK snap: the limb plays in FK after generating", icon='INFO')
             layout.operator("retargetor.snap_fk_to_ik", icon='SNAP_ON')
 
 
