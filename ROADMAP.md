@@ -154,7 +154,7 @@ Order set after the first test on the user's own Rigify character (2026-11-02): 
 - [x] Retype edited `GENERATED` keys as user keys as soon as they are edited (and again before regenerating) (Blender keeps the `GENERATED` type when a key is replaced: see the Phase 3 findings).
 - [x] Partial poses: constrain only the keyed controls (end-effectors). The keyed limb keeps its FK keys on a regenerated body: see the findings.
 
-### Phase 5: user experience and release
+### Phase 5: user experience
 
 - [ ] Prompt segments, visible in the timeline.
 - [ ] Regenerate a single segment (between two key poses, or one prompt segment) without touching the rest.
@@ -163,6 +163,18 @@ Order set after the first test on the user's own Rigify character (2026-11-02): 
 - [ ] Ghost preview of the model's skeleton (nice-to-have).
 - [ ] Clear error messages, progress and cancel (a first version is in Phase 3).
 - [ ] Faster writing for fast or real-time models: compute the controls' values without scene updates (today about 22 ms per frame on Rigify), or preview on the model's armature while generating.
+
+### Phase 6: rig setup for any rig
+
+Goal: a rig other than Rigify (Auto-Rig Pro, Mixamo, a studio's own rig...) is easy to set up. Today only Rigify works on its own, through its preset; setting up a profile by hand (roles, FK and IK controls, IK/FK switch, IK snap) is very heavy (the user's feedback after testing, 2026-11-03). The tasks are leads, to be refined when the phase starts:
+
+- [ ] Presets for other common rigs.
+- [ ] Automatic detection: of the rig type, and of the bones of each role.
+- [ ] Help to fill the profile in (guided steps, pick the bones in the viewport, check the result before generating).
+- [ ] Tests on several rigs.
+
+### Phase 7: release
+
 - [ ] Documentation and packaging; choose the final name (it should not contain "Kimodo").
 
 ## Decisions
@@ -203,6 +215,7 @@ Order set after the first test on the user's own Rigify character (2026-11-02): 
 | 2026-11-02 | The continuity of the motion around key poses is left to the backend (Kimodo's post-processing hits them exactly); it is not measured or blended. Regenerating a single segment and the transitions between segments move to Phase 5, with the prompt segments. |
 | 2026-11-02 | Kimodo: key poses are moved to Kimodo's canonical frame (origin and heading of the first one, as Kimodo computes it) and the result moved back; `first_heading_angle` is not used. Key frames go to the nearest model frame, the time between key poses is stretched so each lands exactly, and the result is resampled to the scene's rate. |
 | 2026-11-03 | After generation, the limbs posed in IK are snapped back to IK (the user's choice, over a "pose in IK here" button on the current frame): their IK controls follow the generated FK motion on every frame (`Generated` keys), the IK/FK switch is put back as the user left it (in FK only while generating, its animation muted), and on the key poses the IK controls are keyed as they are (type Keyframe), so the IK pose stays the user's there and repeated generations don't drift. The rig profile's limbs say how each IK control is snapped (optional `ik_snap`: Follow with the rest offset, Pole in the limb's plane, Rest; format version unchanged); a limb without it stays in FK. Rigify's IK chain is a little shorter than the FK one, so the key poses' offsets are blended between them to avoid a jump. With an IK snap, a switch key in IK between key poses is no longer refused. |
+| 2026-11-03 | New Phase 6, rig setup for any rig, after the user's testing: only Rigify sets itself up (its preset), and a profile set up by hand is too heavy. The release (documentation, packaging, final name) moves to a Phase 7 at the end: nothing is published before the setup works on other rigs. Phase 5 is now "user experience", its plan unchanged. |
 
 ## Open questions
 - Kimodo's code and weights licence, and what it means for distributing the extension.
