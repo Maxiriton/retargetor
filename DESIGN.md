@@ -41,6 +41,7 @@ The animation itself is the source of truth: key poses are not stored in a separ
 - **Generated keys go into the rig's own action**, next to the user keys, told apart only by their type.
 - **No separate NLA strip or action for the result**: the Dope Sheet and Timeline only show the keys of the active action, so the user would see either their keys or the generated ones, never both.
 - A generation is a single undo step.
+- **Clearing**: one operator removes everything the add-on put on a character: the `Generated` keys, and the user keys it made itself on the key poses (snapped FK keys, IK controls keyed as they are, switch keys). Those are recorded on the character when they are made (frames and values), and removed only while they still have the recorded value: one the animator changed is theirs. A key the add-on changes again later (a new snap, a quaternion sign flipped) follows in the record, unless the animator changed it first. F-curves left empty are removed and their channels put back to rest. Needed because the controls the add-on keys are often on hidden, protected bone collections (Rigify's FK controls when the animator works in IK).
 - Takes or variations (comparing several results) are not planned for now. If they come later, they must keep the single-action rule, for example by keeping alternate results aside and swapping them into a segment.
 
 ## Text prompts (later)

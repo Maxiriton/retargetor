@@ -8,6 +8,11 @@ depsgraph handler compares them whenever a character's action changes. A GENERAT
 which was moved to another frame, is retyped as a Keyframe, with the other channels of the same property on that
 frame (the 4 values of a quaternion). Keys retyped that way go back to GENERATED if their values come back (a
 transform cancelled with a right click). The same check runs before each generation.
+
+The add-on also makes user keys (type Keyframe) itself, on the key poses: FK controls snapped to the IK pose, IK
+controls keyed as they are, an IK/FK switch keyed in FK. They are remembered too (object.retargetor["added_keys"]),
+so clear() can remove them with the GENERATED keys, unless the animator changed them since: the controls holding
+them are often on hidden bone collections, out of the animator's reach.
 """
 from contextlib import contextmanager
 
@@ -18,6 +23,7 @@ from bpy.app.handlers import persistent
 GENERATED = 'GENERATED'
 KEYFRAME = 'KEYFRAME'
 RECORD = "generated_keys"
+ADDED = "added_keys"
 # Values closer than this to the recorded one are unchanged (F-curves store float32 values)
 TOLERANCE = 1e-5
 _GENERATED_VALUE = bpy.types.Keyframe.bl_rna.properties["type"].enum_items[GENERATED].value
@@ -71,6 +77,118 @@ def record(rig):
                                "frames": frames[generated].tolist(), "values": values[generated].tolist(),
                                "retyped": []})
     rig.retargetor[RECORD] = curves
+
+
+def snapshot(rig):
+    """{(data path, index): {frame: (value, is GENERATED)}} of the rig's action, for record_added"""
+    bag = _channelbag(rig)
+    result = {}
+    if bag is not None:
+        for fcurve in bag.fcurves:
+            frames, values, types = _points(fcurve)
+            result[(fcurve.data_path, fcurve.array_index)] = {
+                round(f, 3): (v, t == _GENERATED_VALUE)
+                for f, v, t in zip(frames.tolist(), values.tolist(), types.tolist())}
+    return result
+
+
+def record_added(rig, before):
+    """Remember the user keys the add-on just made on the rig (FK snap, IK controls keyed as they are, switch
+    keys): the keys that weren't there in `before` (a snapshot()), or were GENERATED. Keys it made earlier and
+    has changed follow their new values (unless the animator changed them first); the animator's own keys are
+    never recorded."""
+    recorded = {(entry["path"], entry["index"]): dict(zip((round(f, 3) for f in entry["frames"]), entry["values"]))
+                for entry in rig.retargetor.get(ADDED, [])}
+    bag = _channelbag(rig)
+    if bag is not None:
+        for fcurve in bag.fcurves:
+            curve = (fcurve.data_path, fcurve.array_index)
+            old = before.get(curve, {})
+            keys = recorded.get(curve, {})
+            frames, values, types = _points(fcurve)
+            for frame, value, keytype in zip(frames.tolist(), values.tolist(), types.tolist()):
+                if keytype == _GENERATED_VALUE:
+                    continue
+                frame = round(frame, 3)
+                previous = old.get(frame)
+                # New, or GENERATED before: made by the add-on. One it made before follows its new value if the
+                # animator hadn't changed it (still its recorded value in `before`), or if the add-on just wrote
+                # it again with another value
+                if previous is None or previous[1]:
+                    keys[frame] = value
+                elif frame in keys and (abs(previous[0] - keys[frame]) <= TOLERANCE
+                                        or abs(previous[0] - value) > TOLERANCE):
+                    keys[frame] = value
+            if keys:
+                recorded[curve] = keys
+    rig.retargetor[ADDED] = [{"path": path, "index": index, "frames": sorted(keys),
+                              "values": [keys[f] for f in sorted(keys)]}
+                             for (path, index), keys in recorded.items()]
+
+
+def _reset_channel(rig, data_path, index):
+    """Put a pose bone's transform channel back to its rest value (a custom property is left as it is)"""
+    rest = {"location": 0.0, "rotation_euler": 0.0, "scale": 1.0,
+            "rotation_quaternion": 1.0 if index == 0 else 0.0,
+            "rotation_axis_angle": 1.0 if index == 2 else 0.0}
+    try:
+        owner_path, _, prop = data_path.rpartition(".")
+        owner = rig.path_resolve(owner_path) if owner_path else rig
+    except ValueError:
+        return False
+    if not isinstance(owner, bpy.types.PoseBone) or prop not in rest:
+        return False
+    getattr(owner, prop)[index] = rest[prop]
+    return True
+
+
+def clear(rig):
+    """Remove the keys the add-on made on the rig: every GENERATED key, and the user keys it made itself
+    (record_added) unless their values changed since. F-curves left without keys are removed, and their channels
+    put back to rest. Forgets both records. Returns (GENERATED keys removed, added keys removed, added keys kept
+    because they were edited, channels put back to rest)."""
+    added = {(entry["path"], entry["index"]): dict(zip((round(f, 3) for f in entry["frames"]), entry["values"]))
+             for entry in rig.retargetor.get(ADDED, [])}
+    bag = _channelbag(rig)
+    generated = removed = kept = reset = 0
+    if bag is not None:
+        for fcurve in list(bag.fcurves):
+            curve = (fcurve.data_path, fcurve.array_index)
+            ours = added.get(curve, {})
+            points = fcurve.keyframe_points
+            doomed = []
+            for i, point in enumerate(points):
+                if point.type == GENERATED:
+                    doomed.append(i)
+                    generated += 1
+                    continue
+                value = ours.get(round(point.co.x, 3))
+                if value is None:
+                    continue
+                if abs(point.co.y - value) <= TOLERANCE:
+                    doomed.append(i)
+                    removed += 1
+                else:
+                    kept += 1
+            if not doomed:
+                continue
+            for i in reversed(doomed):
+                points.remove(points[i], fast=True)
+            if len(points):
+                fcurve.update()
+                continue
+            path, index = curve
+            bag.fcurves.remove(fcurve)
+            if _reset_channel(rig, path, index):
+                reset += 1
+    for name in (RECORD, ADDED):
+        if name in rig.retargetor:
+            del rig.retargetor[name]
+    return generated, removed, kept, reset
+
+
+def has_added(rig):
+    return bool(rig.retargetor.get(ADDED))
 
 
 def has_record(rig):

@@ -1,9 +1,9 @@
 # type: ignore
-"""Operators generating the in-betweens, and starting / stopping the backend's model."""
+"""Operators generating the in-betweens, clearing them, and starting / stopping the backend's model."""
 import bpy
 from bpy.types import Operator
 
-from . import generation
+from . import generated_keys, generation
 from .backends import process, registry
 from .preferences import active_backend, backend_settings
 from .properties import get_character
@@ -189,6 +189,44 @@ class RTGTR_OT_CancelGeneration(Operator):
         return {'FINISHED'}
 
 
+class RTGTR_OT_ClearGeneratedKeys(Operator):
+    """Remove the keys the add-on made on the character: its Generated keys, and the keys it made on the key poses
+    (FK controls snapped to the IK pose, IK controls, IK/FK switch) unless you changed them since. Your own keys
+    stay. Controls left without any key go back to their rest pose"""
+    bl_idname = "retargetor.clear_generated_keys"
+    bl_label = "Clear Generated Keys"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        rig = _character(context)
+        return (rig is not None and generation.current_task is None and rig.is_editable
+                and rig.animation_data is not None and rig.animation_data.action is not None)
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def execute(self, context):
+        rig = _character(context)
+        with generated_keys.suspended():
+            removed_generated, removed_added, kept, reset = generated_keys.clear(rig)
+            rig.update_tag()
+            context.view_layer.update()
+        if not (removed_generated or removed_added):
+            self.report({'INFO'}, f"No key made by the add-on on '{rig.name}'")
+            return {'CANCELLED'}
+        message = (f"Removed {removed_generated} Generated keys and {removed_added} keys made on the key poses "
+                   f"from '{rig.name}'")
+        if reset:
+            message += f"; {reset} channels left without keys put back to rest"
+        self.report({'INFO'}, message)
+        if kept:
+            self.report({'INFO'}, f"{kept} key{'s' if kept > 1 else ''} made by the add-on kept: you changed "
+                                  f"{'them' if kept > 1 else 'it'}")
+        tag_redraw(context)
+        return {'FINISHED'}
+
+
 class RTGTR_OT_BackendStart(Operator):
     """Start the active backend and load its model, so the first generation doesn't wait for it"""
     bl_idname = "retargetor.backend_start"
@@ -226,6 +264,7 @@ classes = (
     RTGTR_OT_GenerateInbetweens,
     RTGTR_OT_RangeStartHere,
     RTGTR_OT_CancelGeneration,
+    RTGTR_OT_ClearGeneratedKeys,
     RTGTR_OT_BackendStart,
     RTGTR_OT_BackendStop,
 )

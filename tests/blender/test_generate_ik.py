@@ -120,6 +120,8 @@ def main():
     ik_controls = [name for limb in rig_profile.limbs for name in limb.ik_controls]
     ik_keys = {curve: frames for curve, frames in user_keys(keys_by_type(rig, generation)).items()
                if any(f'"{name}"' in curve[0] for name in ik_controls)}
+    # The animator's own keys (edits made below are added): what Clear Generated Keys must leave at the end
+    animator_keys = user_keys(keys_by_type(rig, generation))
 
     task = generation.GenerationTask()
     checks.check(task.run(bpy.context, rig) and task.result is not None, "generated with every limb in IK")
@@ -197,6 +199,9 @@ def main():
     edit_key(rig, generation, 'pose.bones["hand_ik.R"].location', 1, 61,
              value=generation.channelbag(rig).fcurves.find('pose.bones["hand_ik.R"].location', index=1)
              .evaluate(61) - 0.08)
+    edited = keys_by_type(rig, generation)
+    for curve, frame in [((hand_path, i), 30) for i in range(3)] + [(('pose.bones["hand_ik.R"].location', 1), 61)]:
+        animator_keys.setdefault(curve, {})[frame] = edited[curve][frame]
     checks.check(generation.find_key_frames(rig, rig_profile) == [1, 30, 61, 90, 120], "frame 30 is a key pose")
     fk_61 = keys_by_type(rig, generation)[('pose.bones["forearm_fk.R"].rotation_quaternion', 1)][61]
     edited_pose = snapshot(rig, org, [30, 61])
@@ -271,6 +276,39 @@ def main():
     task = generation.GenerationTask()
     checks.check(task.run(bpy.context, rig), "generated again")
     checks.check(user_keys(keys_by_type(rig, generation)).keys() == keys_before.keys(), "user keys kept")
+
+    # Clear Generated Keys: the Generated keys and the keys the add-on made on the key poses go, except one of
+    # them the animator changed; the animator's keys stay; controls left without keys go back to rest
+    snapped = ('pose.bones["forearm_fk.R"].rotation_quaternion', 1)
+    edit_key(rig, generation, snapped[0], snapped[1], 61,
+             value=keys_by_type(rig, generation)[snapped][61][0] + 0.05)
+    animator_keys.setdefault(snapped, {})[61] = keys_by_type(rig, generation)[snapped][61]
+    try:
+        result = bpy.ops.retargetor.clear_generated_keys('EXEC_DEFAULT')
+    except RuntimeError as e:
+        print(f"(operator error) {e}")
+        result = {'CANCELLED'}
+    checks.check(result == {'FINISHED'}, "Clear Generated Keys")
+    after = keys_by_type(rig, generation)
+    checks.check(not any(t == 'GENERATED' for frames in after.values() for _v, t in frames.values()),
+                 "no Generated key left")
+    left = user_keys(after)
+    extra = [(c, f) for c, frames in left.items() for f in frames if f not in animator_keys.get(c, {})]
+    missing = [(c, f) for c, frames in animator_keys.items() for f, key in frames.items()
+               if left.get(c, {}).get(f) != key]
+    checks.check(not extra, f"no key made by the add-on left ({len(extra)}, for example {extra[:2]})")
+    checks.check(not missing, f"the animator's keys are all there, edited ones included ({missing[:2]})")
+    forearm = rig.pose.bones["forearm_fk.L"]
+    checks.check(generation.channelbag(rig).fcurves.find('pose.bones["forearm_fk.L"].rotation_quaternion') is None
+                 and tuple(forearm.rotation_quaternion) == (1.0, 0.0, 0.0, 0.0),
+                 "an FK control left without keys is back at rest")
+    checks.check(not rig.retargetor.get("generated_keys") and not rig.retargetor.get("added_keys"),
+                 "the records are forgotten")
+    try:
+        result = bpy.ops.retargetor.clear_generated_keys('EXEC_DEFAULT')
+    except RuntimeError:
+        result = {'CANCELLED'}
+    checks.check(result == {'CANCELLED'}, "nothing more to clear")
     checks.finish()
 
 

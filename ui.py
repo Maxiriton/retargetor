@@ -268,6 +268,7 @@ class RETARGETOR_PT_GeneratePanel(Panel):
             row = layout.row()
             row.enabled = not problem
             row.operator("retargetor.generate_inbetweens", icon='ANIM')
+            layout.operator("retargetor.clear_generated_keys", icon='TRASH')
 
 
 def _error(layout, text, width=48):

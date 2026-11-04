@@ -600,6 +600,7 @@ class GenerationTask:
         self.ik_writer = None
         self.switches = []  # the IK/FK switches of the limbs in IK, as the user left them (save_switches)
         self.synced = []  # the limbs in IK snapped back to IK after the generation (they have an IK snap)
+        self.keys_before = None  # generated_keys.snapshot() before the add-on makes user keys (FK snap...)
         self.request = None  # the GenerationRequest sent
         self.partial = False
         self.cancel_requested = False
@@ -672,13 +673,19 @@ class GenerationTask:
             # Before anything else changes the rig: the generated motion is written to the FK controls
             self.switches = save_switches(rig, in_ik)
             self.synced = [limb for limb in in_ik if limb.ik_snap]
+            self.keys_before = generated_keys.snapshot(rig)
             snap_limbs_to_fk(context, rig, snaps, in_ik, self.start_frame, self.end_frame)
+            # The keys made there are the add-on's: Clear Generated Keys removes them too
+            generated_keys.record_added(rig, self.keys_before)
             self.modified = True
             self.notes.append(f"FK snapped to IK on {len(snaps)} key poses ({', '.join(l.name for l in in_ik)})")
             unsynced = [limb.name for limb in in_ik if not limb.ik_snap]
             if unsynced:
                 self.notes.append(f"{', '.join(unsynced)} switched to FK: the rig profile has no IK snap for "
                                   "them, so their IK controls can't follow the generated motion")
+        elif generated_keys.has_added(rig):
+            # The keys the add-on made before may change here (quaternion signs): followed by record_added
+            self.keys_before = generated_keys.snapshot(rig)
         model = model_armature(context, rig, self.backend)
         if model is None:
             self.stage = SKELETON
@@ -782,6 +789,9 @@ class GenerationTask:
             self.notes.append(f"{', '.join(limb.name for limb in self.synced)}: IK controls snapped to the generated "
                               "motion, back in IK")
         generated_keys.record(rig)
+        if self.keys_before is not None:
+            # fix_quaternion_signs may have flipped keys the add-on made (same rotations): still the add-on's
+            generated_keys.record_added(rig, self.keys_before)
         self.errors |= self.writer.errors
         self.result = (len(self.writer.frames), self.writer.removed)
         self.stage = FINISHED

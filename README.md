@@ -147,6 +147,7 @@ The model generates the motion from your first key pose to your last one. The re
 
 Kimodo needs no key pose and generates up to 10 s; the panel says when the range is too long, or has fewer key poses than the backend needs (the interpolation test backend needs two). Frames carrying one of your keys are never written. Generating again replaces the Generated keys of the range and keeps yours. The whole generation is one undo step.
 
+- **Clear Generated Keys** (under Generate) removes what the add-on put on the character: its Generated keys, and the keys it made on the key poses (FK controls snapped to your IK pose, IK controls, an IK/FK switch keyed in FK), even on bones hidden in protected bone collections. A key it made that you changed since is yours, and stays. Your own keys stay, and a control left without any key goes back to its rest pose. One undo step.
 - The first generation starts the model (about 20 s with Kimodo); the model then stays loaded, and the next ones take about 3 s plus the time to write the keys (about 3 s for 120 frames, and as much again to snap the IK controls of limbs in IK). **Start** / **Stop** in the panel load the model ahead of time, or free its memory.
 - The model's skeleton is added to the scene as a hidden armature, in a **Retargetor Models** collection, next to your character.
 - Kimodo works at 30 fps and up to 10 s; other scene rates are handled (the key poses land exactly on the model's frames, the result is resampled to the scene's rate). A character facing any direction works.
