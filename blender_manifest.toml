@@ -14,7 +14,7 @@ type = "add-on"
 # https://docs.blender.org/manual/en/dev/advanced/extensions/tags.html
 tags = ["Animation", "Rigging"]
 
-blender_version_min = "5.1.0"
+blender_version_min = "5.2.0"
 
 # License conforming to https://spdx.org/licenses/ (use "SPDX: prefix)
 license = [
@@ -25,11 +25,20 @@ license = [
 [permissions]
 files = "Import and export retarget setups as JSON"
 
-# Optional: build settings.
+# Build settings: only the add-on goes into the package, not the spikes, tests or project notes.
 # https://docs.blender.org/manual/en/dev/advanced/extensions/command_line_arguments.html#command-line-args-extension-build
-# [build]
-# paths_exclude_pattern = [
-#   "__pycache__/",
-#   "/.git/",
-#   "/*.zip",
-# ]
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/.git",
+  "/.git/",
+  "/.gitignore",
+  "/.claude/",
+  "/*.zip",
+  "/spikes/",
+  "/tests/",
+  "/CLAUDE.md",
+  "/CLAUDE.local.md",
+  "/ROADMAP.md",
+  "/DESIGN.md",
+]

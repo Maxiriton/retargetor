@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Claude Code local notes (machine-specific paths)
+CLAUDE.local.md
+
+# Spike outputs (generated motions, test scenes)
+spikes/*/out/

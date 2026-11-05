@@ -2,6 +2,11 @@
 import bpy
 from bpy.types import Panel, UIList
 
+from . import generation
+from .backends import process, registry
+from .preferences import active_backend, ADDON_ID
+from .properties import get_character
+
 class RETARGETOR_PT_RetargetPanel(Panel):
     bl_label = "Retarget"
     bl_idname = "RETARGETOR_PT_RetargetPanel"
@@ -16,14 +21,21 @@ class RETARGETOR_PT_RetargetPanel(Panel):
         layout.label(text="Setup", icon='SETTINGS')
 
         box = layout.box()
-        box.prop(scene, "retarget_source_armature", text="Source")
-        box.prop(scene, "retarget_target_armature", text="Target")
+        box.prop(scene, "retargetor_target", text="Target")
+        target_obj, state = get_character(context)
+        if target_obj is None:
+            if scene.retargetor_target is not None:
+                layout.label(text=f"'{scene.retargetor_target.name}' isn't in the scene anymore", icon='ERROR')
+            layout.label(text="Choose the armature that receives the animation")
+            return
+
+        box.prop(state, "source", text="Source")
 
         row = box.row(align=True)
-        row.prop(scene, "retarget_translation_scale", text="Translation Scale")
+        row.prop(state, "translation_scale", text="Translation Scale")
         row.operator("retargetor.auto_translation_scale", icon='FIXED_SIZE')
 
-        if len(context.scene.retarget_bones) == 0 :
+        if len(state.bones) == 0 :
             layout.label(text="Bone list is empty: build it or import a JSON")
             row = layout.row(align=True)
             s = row.split(factor=0.7)
@@ -40,8 +52,8 @@ class RETARGETOR_PT_RetargetPanel(Panel):
             layout.label(text="Bone list")
             layout.template_list(
                 "RTGTR_UL_Bones", "bones",
-                scene, "retarget_bones",
-                scene, "retarget_bones_active_index"
+                state, "bones",
+                state, "bones_active_index"
             )
             layout.operator('retargetor.export_setup_to_json', text="Export to JSON")
 
@@ -58,22 +70,25 @@ class RTGTR_UL_Bones(UIList):
     """UI list for matching and setting up bones"""
     def draw_item(self, context, layout, data, item, icon, active_data, active_property, index):
         row = layout.row(align=True)
+        state = data
 
-        if context.scene.retarget_is_recording and context.scene.retarget_bones_active_index != index:
+        if state.is_recording and state.bones_active_index != index:
             row.enabled = False
 
         split1 = row.split(factor=0.33, align=True)
         col1 = split1.column(align=True)
 
-        if item.is_setup:
-            col1.label(text=item.src_name, icon='CHECKMARK')
-        else:
-            col1.label(text=item.src_name, icon='DECORATE')
+        # A check mark: both bones of the pair exist, so the rest offsets can be computed
+        target_obj = context.scene.retargetor_target
+        source_obj = state.source
+        is_setup = bool(item.target_name) and source_obj is not None and target_obj is not None and \
+            source_obj.data.bones.get(item.src_name) is not None and \
+            target_obj.data.bones.get(item.target_name) is not None
+        col1.label(text=item.src_name, icon='CHECKMARK' if is_setup else 'DECORATE')
 
         split2 = split1.split(factor=0.5, align=True)
         col2 = split2.column(align=True)
 
-        target_obj = context.scene.retarget_target_armature
         if target_obj:
             col2.prop_search(
                 item,
@@ -90,7 +105,7 @@ class RTGTR_UL_Bones(UIList):
         row2.prop(item, "use_translation", text="", icon='CON_LOCLIKE', toggle=True)
         row2.prop(item, "offset_mode", text="")
 
-        if context.scene.retarget_is_recording and context.scene.retarget_bones_active_index == index:
+        if state.is_recording and state.bones_active_index == index:
             row2.operator(
                 "retargetor.finish_record",
                 text="Finish Recording",
@@ -98,7 +113,7 @@ class RTGTR_UL_Bones(UIList):
             )
         elif item.has_corrective_offset:
             row2.operator(
-                "retargetor.record_adjustement",
+                "retargetor.record_adjustment",
                 text="Update Record",
                 icon='ARMATURE_DATA'
             )
@@ -109,18 +124,234 @@ class RTGTR_UL_Bones(UIList):
             )
         else:
             row2.operator(
-                "retargetor.record_adjustement",
+                "retargetor.record_adjustment",
                 text="Record Correction",
                 icon='ARMATURE_DATA'
             )
 
 
+class RETARGETOR_PT_RigProfilePanel(Panel):
+    """Rig profile of the active armature: its bones for each humanoid role"""
+    bl_label = "Rig Profile"
+    bl_idname = "RETARGETOR_PT_RigProfilePanel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Retarget Tool'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        layout = self.layout
+        obj = context.active_object
+        if obj is None or obj.type != 'ARMATURE':
+            layout.label(text="Select an armature")
+            return
+
+        armature = obj.data
+        profile = armature.retargetor_profile
+        layout.label(text=f"Armature: {armature.name}", icon='ARMATURE_DATA')
+        if not armature.is_editable:
+            layout.label(text="Linked armature: edit the profile in its library file", icon='LIBRARY_DATA_DIRECT')
+        if profile.source and len(profile.roles) > 0:
+            layout.label(text=f"From the preset '{profile.source}'", icon='PRESET')
+
+        row = layout.row(align=True)
+        row.operator("retargetor.profile_load_preset", icon='PRESET')
+        row.operator("retargetor.profile_add_roles", icon='ADD')
+        row = layout.row(align=True)
+        row.operator("retargetor.profile_import_json", icon='IMPORT')
+        row.operator("retargetor.profile_export_json", icon='EXPORT')
+
+        if len(profile.roles) == 0:
+            layout.label(text="No role mapped yet: load a preset or add the roles")
+        else:
+            row = layout.row()
+            row.label(text="Role")
+            row.label(text="Read")
+            row.label(text="Write")
+            layout.template_list("RTGTR_UL_Roles", "roles", profile, "roles", profile, "roles_active_index", rows=6)
+
+        if len(profile.limbs) > 0:
+            layout.label(text="IK limbs", icon='CON_KINEMATIC')
+            layout.template_list("RTGTR_UL_Limbs", "limbs", profile, "limbs", profile, "limbs_active_index", rows=2)
+            if 0 <= profile.limbs_active_index < len(profile.limbs):
+                limb = profile.limbs[profile.limbs_active_index]
+                box = layout.box()
+                box.prop_search(limb, "switch_bone", obj.pose, "bones")
+                box.prop(limb, "switch_property")
+                box.prop(limb, "fk_value")
+                for pair in limb.controls:
+                    row = box.row(align=True)
+                    row.prop_search(pair, "fk_control", obj.pose, "bones", text="")
+                    row.label(icon='FORWARD')
+                    row.prop_search(pair, "followed_bone", obj.pose, "bones", text="")
+                if len(limb.ik_controls) > 0:
+                    box.label(text="IK controls (their keys make key poses)")
+                    for ref in limb.ik_controls:
+                        box.prop_search(ref, "bone", obj.pose, "bones", text="")
+                if len(limb.ik_snap) > 0:
+                    box.label(text="IK snap (after generating, in order)")
+                    for snap in limb.ik_snap:
+                        row = box.row(align=True)
+                        row.prop_search(snap, "ik_control", obj.pose, "bones", text="")
+                        row.prop(snap, "mode", text="")
+                        sub = row.row(align=True)
+                        sub.enabled = snap.mode != 'REST'
+                        sub.prop_search(snap, "followed_bone", obj.pose, "bones", text="")
+                else:
+                    box.label(text="No IK snap: the limb plays in FK after generating", icon='INFO')
+            layout.operator("retargetor.snap_fk_to_ik", icon='SNAP_ON')
+
+
+class RETARGETOR_PT_GeneratePanel(Panel):
+    """Generate the in-betweens of the character with the active backend"""
+    bl_label = "Generate"
+    bl_idname = "RETARGETOR_PT_GeneratePanel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Retarget Tool'
+
+    def draw(self, context):
+        layout = self.layout
+        backend = active_backend(context)
+
+        row = layout.row(align=True)
+        row.label(text=f"Backend: {backend.label}", icon='OUTLINER_OB_ARMATURE')
+        props = row.operator("preferences.addon_show", text="", icon='PREFERENCES')
+        props.module = ADDON_ID
+
+        worker = registry.existing_worker(backend.id)
+        row = layout.row(align=True)
+        if worker is None or worker.state == process.STOPPED:
+            row.label(text="Stopped", icon='RADIOBUT_OFF')
+            row.operator("retargetor.backend_start", text="Start", icon='PLAY')
+        else:
+            if worker.state == process.STARTING or (worker.busy and not worker.loaded):
+                row.label(text="Starting", icon='SORTTIME')
+            elif worker.busy:
+                row.label(text="Busy", icon='SORTTIME')
+            elif worker.loaded:
+                row.label(text="Model loaded", icon='CHECKMARK')
+            else:
+                row.label(text="Running", icon='RADIOBUT_ON')
+            if not worker.loaded and not worker.busy:
+                row.operator("retargetor.backend_start", text="Load", icon='PLAY')
+            row.operator("retargetor.backend_stop", text="Stop", icon='PAUSE')
+        if worker is not None and worker.error:
+            box = layout.box()
+            for line in worker.error.splitlines()[:6]:
+                box.label(text=line, icon='ERROR')
+
+        rig, state = get_character(context)
+        if rig is None:
+            layout.label(text="Choose the character in the Retarget panel")
+            return
+        layout.label(text=f"Character: {rig.name}", icon='ARMATURE_DATA')
+        draw_profile_status(layout, rig)
+        active = context.active_object
+        if (active is not None and active != rig and active.type == 'ARMATURE'
+                and active != rig.retargetor.model_armature):
+            layout.label(text=f"The active armature is '{active.name}', not the character", icon='ERROR')
+        caps = backend.capabilities
+        if caps.prompt:
+            layout.prop(state, "prompt", text="")
+        if caps.seed:
+            layout.prop(state, "seed")
+
+        problem = draw_range(context, layout, rig, state, backend)
+
+        task = generation.current_task
+        if task is not None:
+            row = layout.row(align=True)
+            row.progress(factor=task.fraction, type='BAR', text=f"{task.message} {task.fraction * 100:.0f}%")
+            row.operator("retargetor.cancel_generation", text="", icon='CANCEL')
+        else:
+            row = layout.row()
+            row.enabled = not problem
+            row.operator("retargetor.generate_inbetweens", icon='ANIM')
+            layout.operator("retargetor.clear_generated_keys", icon='TRASH')
+
+
+def _error(layout, text, width=48):
+    """An error message as labels, cut into lines"""
+    import textwrap
+    for i, line in enumerate(textwrap.wrap(text, width) if text else []):
+        layout.label(text=line, icon='ERROR' if i == 0 else 'BLANK1')
+
+
+def draw_profile_status(layout, rig):
+    """Where the character's rig profile comes from"""
+    from .profile_operators import detect_preset
+    profile = rig.data.retargetor_profile
+    if len(profile.roles) > 0:
+        source = f"preset '{profile.source}'" if profile.source else "set up by hand"
+        layout.label(text=f"Rig profile: {source}", icon='OUTLINER_DATA_ARMATURE')
+        return
+    detected = detect_preset(rig.data)
+    if detected is not None:
+        layout.label(text=f"Rig profile: preset '{detected[0]}' (detected)", icon='OUTLINER_DATA_ARMATURE')
+    else:
+        _error(layout, "No rig profile: map the bones to the humanoid roles in the Rig Profile panel")
+
+
+def draw_range(context, layout, rig, state, backend):
+    """The frames the next generation covers, and why the backend can't generate them ("" if it can)"""
+    box = layout.box()
+    box.row().prop(state, "range_mode", expand=True)
+    if state.range_mode == 'CUSTOM':
+        row = box.row(align=True)
+        row.prop(state, "range_start")
+        row.operator("retargetor.range_start_here", text="", icon='TIME')
+        row.prop(state, "range_duration")
+    scene = context.scene
+    fps = scene.render.fps / scene.render.fps_base
+    from .profile_operators import detect_preset
+    rig_profile = rig.data.retargetor_profile.to_core()
+    detected = detect_preset(rig.data) if not rig_profile.roles else None
+    try:
+        start, end, key_frames = generation.generation_range(rig, detected[1] if detected else rig_profile)
+    except ValueError as e:
+        _error(box, str(e))
+        return str(e)
+    keys = ", ".join(str(f) for f in key_frames[:6]) + (" ..." if len(key_frames) > 6 else "")
+    box.label(text=f"Frames {start}-{end} ({(end - start + 1) / fps:.1f} s)", icon='TIME')
+    box.label(text=f"{len(key_frames)} key poses" + (f": {keys}" if key_frames else " (prompt only)"),
+              icon='KEYFRAME')
+    problem = backend.range_problem(start, end, fps, len(key_frames))
+    _error(box, problem)
+    return problem
+
+
+class RTGTR_UL_Roles(UIList):
+    """Humanoid roles of a rig profile: the bone read and the control written for each"""
+    def draw_item(self, context, layout, data, item, icon, active_data, active_property, index):
+        obj = context.active_object
+        split = layout.split(factor=0.25, align=True)
+        split.label(text=item.label)
+        split = split.split(factor=0.4, align=True)
+        split.prop_search(item, "read_bone", obj.pose, "bones", text="")
+        split = split.split(factor=0.67, align=True)
+        split.prop_search(item, "write_bone", obj.pose, "bones", text="")
+        row = split.row(align=True)
+        row.prop(item, "use_translation", text="", icon='CON_LOCLIKE', toggle=True)
+        row.prop(item, "offset_mode", text="")
+
+
+class RTGTR_UL_Limbs(UIList):
+    """Limbs whose FK controls can be snapped to their IK pose"""
+    def draw_item(self, context, layout, data, item, icon, active_data, active_property, index):
+        row = layout.row(align=True)
+        row.prop(item, "name", text="", emboss=False)
+        row.label(text=f"{len(item.controls)} FK controls")
 
 
 ### Registration
 classes = (
     RTGTR_UL_Bones,
+    RTGTR_UL_Roles,
+    RTGTR_UL_Limbs,
     RETARGETOR_PT_RetargetPanel,
+    RETARGETOR_PT_RigProfilePanel,
+    RETARGETOR_PT_GeneratePanel,
 )
 
 def register():
