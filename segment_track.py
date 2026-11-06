@@ -136,10 +136,11 @@ def segment_state(item):
     return 'GENERATED' if item.generated == generated_signature(item) else 'MODIFIED'
 
 
-def mark_generated(state):
-    """After a generation of the whole track: every segment is up to date"""
-    for item in state.segments:
-        item.generated = generated_signature(item)
+def mark_generated(state, index=None):
+    """After a generation: every segment is up to date, or only the one regenerated alone (index)"""
+    for i, item in enumerate(state.segments):
+        if index is None or i == index:
+            item.generated = generated_signature(item)
     tag_redraw()
 
 

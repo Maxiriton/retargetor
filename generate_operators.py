@@ -1,6 +1,7 @@
 # type: ignore
 """Operators generating the in-betweens, clearing them, and starting / stopping the backend's model."""
 import bpy
+from bpy.props import IntProperty
 from bpy.types import Operator
 
 from . import generated_keys, generation
@@ -64,8 +65,9 @@ def _failed(operator, task, error, context):
 def _report_result(operator, task):
     frames, removed = task.result
     timings = ", ".join(f"{name} {seconds:.1f} s" for name, seconds in task.timings.items())
+    what = f"segment {task.segment_index + 1}, " if task.segment_index is not None else ""
     operator.report({'INFO'}, f"{frames} frames generated on '{task.rig_name}' with {task.backend.label} "
-                              f"(frames {task.start_frame}-{task.end_frame}, {len(task.key_frames)} key poses; "
+                              f"({what}frames {task.start_frame}-{task.end_frame}, {len(task.key_frames)} key poses; "
                               f"{timings})")
     for note in task.notes:
         operator.report({'INFO'}, note)
@@ -73,14 +75,9 @@ def _report_result(operator, task):
         operator.report({'WARNING'}, "Some bones were skipped: " + "; ".join(sorted(task.errors)))
 
 
-class RTGTR_OT_GenerateInbetweens(Operator):
-    """Generate the character's motion with the active backend, from the first key pose to the last one, on its
-    custom range, or on its whole track of prompt segments. Key poses are the frames where a control of the rig profile has a key that isn't
-    Generated; the result is written as Generated keys, never on a key pose. Esc cancels"""
-    bl_idname = "retargetor.generate_inbetweens"
-    bl_label = "Generate In-betweens"
-    bl_options = {'REGISTER', 'UNDO'}
-
+class GenerateBase:
+    """Runs a GenerationTask: blocking from execute, step by step from invoke (a modal operator following it from a
+    timer). Subclasses say which prompt segment (_segment)."""
     _timer = None
     _task = None
 
@@ -89,12 +86,16 @@ class RTGTR_OT_GenerateInbetweens(Operator):
         rig = _character(context)
         return rig is not None and generation.current_task is None and rig.is_editable
 
+    def _segment(self, context):
+        """Index of the prompt segment to regenerate alone, or None for the whole generation"""
+        raise NotImplementedError
+
     def execute(self, context):
         """Blocking: used from scripts and tests (invoke runs the same steps without freezing Blender)"""
         rig = _character(context)
         task = generation.GenerationTask()
         try:
-            if not task.run(context, rig):
+            if not task.run(context, rig, segment=self._segment(context)):
                 return _cancelled(self, task, context)
         except GENERATION_ERRORS as e:
             return _failed(self, task, e, context)
@@ -105,7 +106,7 @@ class RTGTR_OT_GenerateInbetweens(Operator):
         rig = _character(context)
         task = generation.GenerationTask()
         try:
-            task.start(context, rig)
+            task.start(context, rig, self._segment(context))
         except GENERATION_ERRORS as e:
             return _failed(self, task, e, context)
         self._task = task
@@ -155,6 +156,45 @@ class RTGTR_OT_GenerateInbetweens(Operator):
             return _cancelled(self, task, context)
         _report_result(self, task)
         return {'FINISHED'}
+
+
+class RTGTR_OT_GenerateInbetweens(GenerateBase, Operator):
+    """Generate the character's motion with the active backend, from the first key pose to the last one, on its
+    custom range, or on its whole track of prompt segments. Key poses are the frames where a control of the rig
+    profile has a key that isn't Generated; the result is written as Generated keys, never on a key pose. Esc
+    cancels"""
+    bl_idname = "retargetor.generate_inbetweens"
+    bl_label = "Generate In-betweens"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def _segment(self, context):
+        return None
+
+
+class RTGTR_OT_RegenerateSegment(GenerateBase, Operator):
+    """Regenerate one prompt segment of the character, the rest of its track left as it is. With a backend that
+    continues the motion around it, the segment joins its neighbours already generated without a jump (the
+    transition is the model's). Only the segment's frames get new Generated keys. Esc cancels"""
+    bl_idname = "retargetor.regenerate_segment"
+    bl_label = "Regenerate Segment"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    index: IntProperty(name="Segment", description="Index of the segment (-1: the active one)", default=-1,
+                       options={'SKIP_SAVE'})
+
+    @classmethod
+    def poll(cls, context):
+        rig = _character(context)
+        if rig is None or generation.current_task is not None or not rig.is_editable:
+            return False
+        if len(rig.retargetor.segments) == 0:
+            cls.poll_message_set("The character has no prompt segment")
+            return False
+        return True
+
+    def _segment(self, context):
+        state = _character(context).retargetor
+        return state.segments_active_index if self.index < 0 else self.index
 
 
 class RTGTR_OT_RangeStartHere(Operator):
@@ -262,6 +302,7 @@ class RTGTR_OT_BackendStop(Operator):
 
 classes = (
     RTGTR_OT_GenerateInbetweens,
+    RTGTR_OT_RegenerateSegment,
     RTGTR_OT_RangeStartHere,
     RTGTR_OT_CancelGeneration,
     RTGTR_OT_ClearGeneratedKeys,
