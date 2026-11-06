@@ -15,7 +15,7 @@ if REPO not in sys.path:
 
 from backends.kimodo import convert  # noqa: E402
 from core import quat  # noqa: E402
-from core.motion import GenerationRequest, Pose  # noqa: E402
+from core.motion import GenerationRequest, Motion, Pose  # noqa: E402
 
 
 def small_layout():
@@ -207,6 +207,47 @@ class TestCanonical(unittest.TestCase):
         np.testing.assert_allclose(pos_b[0, :2], origin.root_position[:2], atol=1e-9)
         with self.assertRaisesRegex(ValueError, "origin"):
             convert.request_to_constraints(GenerationRequest(1, 90, 30.0), layout, 30.0)
+
+    def test_context(self):
+        """The motion around the range: generated with it, its model frames constrained (whole body, hands and
+        feet), the canonical frame from its first frame, only the range returned"""
+        layout = small_layout()
+        effectors = {"end-effector": {"Hips"}, "right-foot": {"RightLeg", "RightShin"}}
+        walk = make_request(turn=1.0, offset=(2.0, 3.0), frames=tuple(range(1, 81)))  # a pose on every frame
+        poses = [walk.key_poses[f] for f in range(1, 81)]
+        before = Motion(30.0, 26, poses[25:30])   # frames 26-30
+        after = Motion(30.0, 61, poses[60:65])    # frames 61-65
+        request = GenerationRequest(31, 60, 30.0, {45: poses[44]}, origin=poses[30], context_before=before,
+                                    context_after=after)
+        constraints, canonical, timing = convert.request_to_constraints(request, layout, 30.0, effectors)
+        self.assertEqual(timing.count, 40)  # frames 26-65
+        self.assertEqual([(c["type"], c["frame_indices"]) for c in constraints],
+                         [("fullbody", [0, 1, 2, 3, 4, 19, 35, 36, 37, 38, 39]),
+                          ("right-foot", [0, 1, 2, 3, 4, 35, 36, 37, 38, 39])])
+        # The canonical frame is the first frame of the motion before
+        _c, from_first, _t = convert.request_to_constraints(
+            GenerationRequest(26, 30, 30.0, {26: poses[25]}), layout, 30.0)
+        np.testing.assert_allclose(canonical.origin, from_first.origin, atol=1e-12)
+        self.assertAlmostEqual(canonical.heading, from_first.heading)
+        # The constraints are the context's poses, in the canonical frame
+        full = constraints[0]
+        _r, roots = convert.key_poses_to_kimodo(GenerationRequest(26, 26, 30.0, {26: poses[25]}), layout)[1:]
+        _rot, expected = canonical.apply(np.zeros((1, 4)) + (1, 0, 0, 0), roots)
+        np.testing.assert_allclose(full["root_positions"][0], expected[0], atol=1e-12)
+        # Output: the range only, the model frames of the range at their times
+        count = timing.count
+        out_pos = np.zeros((count, 3))
+        out_pos[:, 0] = np.arange(count)
+        rot_b, pos_b = convert.output_to_blender(np.tile(np.eye(3), (count, 5, 1, 1)), out_pos,
+                                                 canonical, request, timing)
+        self.assertEqual(len(rot_b), 30)
+        back = canonical.undo(np.zeros((count, 4)) + (1, 0, 0, 0), out_pos)[1]
+        np.testing.assert_allclose(pos_b[0], convert.to_blender(back[5]), atol=1e-9)  # frame 31: model frame 5
+        # At another frame rate, the context still covers the model frames before the range
+        fast = GenerationRequest(31, 60, 24.0, {}, origin=poses[30],
+                                 context_before=Motion(24.0, 26, poses[25:30]))
+        constraints, _canonical, timing = convert.request_to_constraints(fast, layout, 30.0)
+        self.assertEqual(constraints[0]["frame_indices"], [0, 1, 2, 3, 4])
 
 
 if __name__ == "__main__":

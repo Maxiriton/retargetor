@@ -12,6 +12,9 @@ Kimodo (checked in spikes/phase0 and phase1):
 - 30 fps. Key frames go to the nearest model frame; between key poses (and the ends of the range) the time is
   stretched linearly so every key pose lands exactly on its model frame, then the result is resampled to the
   scene's frame rate.
+- Motion around the range (regenerating one prompt segment): generated with the range, its model frames
+  constrained (whole body, hands and feet), as Kimodo's multi-prompt generation constrains the start of a segment
+  with the end of the previous one. Only the range is returned.
 """
 from __future__ import annotations
 
@@ -256,25 +259,77 @@ def end_effectors(constrained_joints, effectors):
     return sorted(types)
 
 
+def _motion_arrays(motion, layout, what):
+    """Global rotations (frames, 77, 4) and root positions (frames, 3) of a Motion, Kimodo axes"""
+    rotations = np.empty((len(motion.poses), len(layout.names77), 4))
+    roots = np.empty((len(motion.poses), 3))
+    for k, pose in enumerate(motion.poses):
+        rotations[k], roots[k] = _pose_arrays(pose, layout, f"The motion {what} the range, frame "
+                                                            f"{motion.start_frame + k},")
+    return quat_to_kimodo(rotations), to_kimodo(roots)
+
+
+def context_samples(request, layout, timing, skip=()):
+    """The model frames falling in the request's context motions (the motion just before and after its range):
+    (model frame indices, global rotations (n, 77, 4), root positions (n, 3)), Kimodo axes, the context sampled at
+    each one's time (slerp, lerp). The model frames in `skip` (key poses) are left out."""
+    times = np.interp(np.arange(timing.count, dtype=np.float64), np.asarray(timing.anchor_indices, dtype=np.float64),
+                      np.asarray(timing.anchors, dtype=np.float64))
+    indices, rotations, roots = [], [], []
+    for motion, what in ((request.context_before, "before"), (request.context_after, "after")):
+        if motion is None:
+            continue
+        if what == "before":
+            inside = times <= request.start_frame - 1 + 1e-6
+        else:
+            inside = times >= request.end_frame + 1 - 1e-6
+        chosen = [i for i in np.nonzero(inside)[0].tolist() if i not in skip]
+        if not chosen:
+            continue
+        motion_rotations, motion_roots = _motion_arrays(motion, layout, what)
+        rot, pos = resample(motion_rotations, motion_roots, times[chosen] - motion.start_frame)
+        indices += chosen
+        rotations.append(rot)
+        roots.append(pos)
+    if not indices:
+        return [], np.empty((0, len(layout.names77), 4)), np.empty((0, 3))
+    return indices, np.concatenate(rotations), np.concatenate(roots)
+
+
 def request_to_constraints(request, layout, model_fps, effectors=None):
     """Kimodo's inputs for a GenerationRequest.
     effectors: {end-effector name: joints} (joints.END_EFFECTORS): partial key poses become end-effector
     constraints; without it every key pose constrains the whole body.
-    The canonical frame comes from the request's origin (the character on the first frame), or from the first
-    key pose without one. Returns (constraints list for kimodo.constraints.load_constraints_lst, Canonical,
-    Timing). Without key poses, the constraints list is empty (prompt only).
-    Raises ValueError if there is neither key pose nor origin."""
+    The motion around the range (request.context_before / context_after) is generated too, its model frames
+    constrained like the start of a segment in Kimodo's multi-prompt generation (the whole body, and the hands and
+    feet): the result continues it. The model frames then cover the context as well; output_to_blender keeps the
+    range only.
+    The canonical frame comes from the first frame of the motion before the range, else from the request's origin
+    (the character on the first frame), else from the first key pose. Returns (constraints list for
+    kimodo.constraints.load_constraints_lst, Canonical, Timing). Without key pose nor context, the constraints list
+    is empty (prompt only). Raises ValueError if there is neither key pose, context nor origin."""
     frames, rotations, roots = key_poses_to_kimodo(request, layout)
-    timing = model_timing(request.start_frame, request.end_frame, frames, request.fps, model_fps)
-    if request.origin is not None:
+    before, after = request.context_before, request.context_after
+    first = before.start_frame if before is not None else request.start_frame
+    last = after.end_frame if after is not None else request.end_frame
+    timing = model_timing(first, last, frames, request.fps, model_fps)
+    context_indices, context_rotations, context_roots = context_samples(request, layout, timing,
+                                                                        set(timing.key_indices))
+    if before is not None:
+        canonical = canonical_from(*_motion_arrays(before, layout, "before"), layout)
+    elif request.origin is not None:
         origin_rotation, origin_root = _pose_arrays(request.origin, layout, "The origin")
         canonical = canonical_from(quat_to_kimodo(origin_rotation)[None], to_kimodo(origin_root)[None], layout)
     elif frames:
         canonical = canonical_from(rotations, roots, layout)
     else:
         raise ValueError("A request without key pose needs an origin.")
-    if not frames:
+    if not frames and not context_indices:
         return [], canonical, timing
+    # The key poses, then the context's model frames
+    rotations = np.concatenate((rotations, context_rotations))
+    roots = np.concatenate((roots, context_roots))
+    indices = list(timing.key_indices) + list(context_indices)
     rotations, roots = canonical.apply(rotations, roots)
 
     local = []
@@ -283,20 +338,26 @@ def request_to_constraints(request, layout, model_fps, effectors=None):
         parent = layout.parents77[j]
         q = rotations[:, j] if parent < 0 else quat.multiply(quat.conjugate(rotations[:, parent]), rotations[:, j])
         local.append(quat.to_axis_angle(q))
-    local = np.stack(local, axis=1)  # (keys, 30, 3)
-    # Key poses grouped by constraint type: the whole body, or each end-effector they key (a pose keying both
-    # hands is in both hand constraints)
+    local = np.stack(local, axis=1)  # (items, 30, 3)
+    # Grouped by constraint type: the whole body, or each end-effector a key pose keys (a pose keying both hands is
+    # in both hand constraints). The context constrains the whole body, and the hands and feet by name (Kimodo's
+    # post-processing places those exactly), as Kimodo's multi-prompt transitions do.
+    context_kinds = ["fullbody"] + sorted(k for k in (effectors or {}) if k != "end-effector")
     groups = {}
-    for k, frame in enumerate(frames):
-        pose = request.key_poses[frame]
-        kinds = end_effectors(pose.constrained_joints, effectors) if effectors else None
-        for kind in kinds or ["fullbody"]:
+    for k in range(len(indices)):
+        if k < len(frames):
+            pose = request.key_poses[frames[k]]
+            kinds = (end_effectors(pose.constrained_joints, effectors) if effectors else None) or ["fullbody"]
+        else:
+            kinds = context_kinds
+        for kind in kinds:
             groups.setdefault(kind, []).append(k)
     constraints = []
     for kind, ks in sorted(groups.items(), key=lambda item: (item[0] != "fullbody", item[0])):
+        ks = sorted(ks, key=lambda k: indices[k])
         constraint = {
             "type": kind,
-            "frame_indices": [timing.key_indices[k] for k in ks],
+            "frame_indices": [indices[k] for k in ks],
             "local_joints_rot": local[ks].tolist(),
             "root_positions": roots[ks].tolist(),
         }

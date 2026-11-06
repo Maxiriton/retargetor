@@ -102,6 +102,9 @@ class GenerationRequest:
     model's skeleton. Not a constraint: it tells where the motion starts and which way the character faces.
     segments: prompt segments (core.segments) covering start_frame to end_frame exactly, for a backend generating a
     track of prompts in one pass (Capabilities.prompt_segments); prompt and seed are then unused. Empty: one prompt.
+    context_before / context_after: the motion already there just before start_frame (ending on start_frame - 1) and
+    just after end_frame (starting on end_frame + 1), for a backend continuing it (Capabilities.motion_context): the
+    result must join it without a jump, the transition being the backend's own. Never written back. None: free.
     """
     start_frame: int
     end_frame: int
@@ -111,6 +114,8 @@ class GenerationRequest:
     seed: int | None = None
     origin: Pose | None = None
     segments: list[PromptSegment] = field(default_factory=list)
+    context_before: Motion | None = None
+    context_after: Motion | None = None
 
     def __post_init__(self):
         if self.end_frame < self.start_frame:
@@ -126,6 +131,18 @@ class GenerationRequest:
             if (first, last) != (self.start_frame, self.end_frame):
                 raise ValueError(f"The segments cover frames {first}-{last}, the request {self.start_frame}-"
                                  f"{self.end_frame}.")
+        for context, frame, what in ((self.context_before, self.start_frame - 1, "before"),
+                                     (self.context_after, self.end_frame + 1, "after")):
+            if context is None:
+                continue
+            if not context.poses:
+                raise ValueError(f"The motion {what} the range is empty.")
+            if abs(context.fps - self.fps) > 1e-6:
+                raise ValueError(f"The motion {what} the range is at {context.fps:g} fps, the request at {self.fps:g}.")
+            edge = context.end_frame if what == "before" else context.start_frame
+            if edge != frame:
+                raise ValueError(f"The motion {what} the range must {'end' if what == 'before' else 'start'} on "
+                                 f"frame {frame}, not {edge}.")
 
     @property
     def duration(self):
@@ -142,6 +159,8 @@ class GenerationRequest:
             "seed": self.seed,
             "origin": self.origin.to_dict() if self.origin is not None else None,
             "segments": [segment.to_dict() for segment in self.segments],
+            "context_before": self.context_before.to_dict() if self.context_before is not None else None,
+            "context_after": self.context_after.to_dict() if self.context_after is not None else None,
         }
 
     @classmethod
@@ -155,4 +174,6 @@ class GenerationRequest:
             seed=data.get("seed"),
             origin=Pose.from_dict(data["origin"]) if data.get("origin") is not None else None,
             segments=[PromptSegment.from_dict(s) for s in data.get("segments") or []],
+            context_before=Motion.from_dict(data["context_before"]) if data.get("context_before") else None,
+            context_after=Motion.from_dict(data["context_after"]) if data.get("context_after") else None,
         )

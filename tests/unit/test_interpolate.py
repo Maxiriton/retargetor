@@ -18,7 +18,7 @@ from backends import process, protocol  # noqa: E402
 from backends.interpolate.generate import segments  # noqa: E402
 from backends.interpolate.skeleton import skeleton  # noqa: E402
 from core import roles  # noqa: E402
-from core.motion import GenerationRequest, Pose  # noqa: E402
+from core.motion import GenerationRequest, Motion, Pose  # noqa: E402
 from core.skeleton import Skeleton  # noqa: E402
 
 WORKER = os.path.join(REPO, "backends", "interpolate", "worker.py")
@@ -59,6 +59,21 @@ class TestInterpolation(unittest.TestCase):
         np.testing.assert_allclose(poses[1][0][head], turn(0.0), atol=1e-12)  # held before the first key
         np.testing.assert_allclose(poses[21][0][head], turn(0.5), atol=1e-12)  # held after the last key
         np.testing.assert_allclose(poses[10][0][names.index("hand.L")], (1.0, 0.0, 0.0, 0.0))  # not in the poses
+
+    def test_context(self):
+        """The motion around the range is interpolated from, never returned"""
+        names = skeleton().names
+        before = Motion(24.0, 3, [Pose({"head": turn(0.3)}, (0.0, 0.0, 1.0)), Pose({"head": turn(0.0)}, (0.0, 0.0, 1.0))])
+        after = Motion(24.0, 16, [Pose({"head": turn(1.1)}, (0.0, -1.1, 1.0))])
+        request = GenerationRequest(5, 15, 24.0, {}, context_before=before, context_after=after)
+        chunks = list(segments(request, names))
+        frames = [first + i for first, rot, _ in chunks for i in range(len(rot))]
+        self.assertEqual(frames, list(range(5, 16)))
+        poses = {f: (rot[i], root[i]) for first, rot, root in chunks for i, f in enumerate(range(first, first + len(rot)))}
+        head = names.index("head")
+        # Halfway from frame 4 (the last one before) to frame 16 (the first one after)
+        np.testing.assert_allclose(poses[10][0][head], turn(0.55), atol=1e-12)
+        np.testing.assert_allclose(poses[10][1], (0.0, -0.55, 1.0), atol=1e-12)
 
     def test_worker(self):
         worker = process.Worker([sys.executable, "-I", "-u", WORKER])
