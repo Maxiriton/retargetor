@@ -25,6 +25,7 @@ It can also **generate in-betweens**: pose your own rig at a few key frames, and
 - **Several characters per scene**: each target armature keeps its own setup.
 - **Rig profile**: map a rig once to humanoid roles (hips, upper arm, shin...), with a bone to read and a control to write for each, and snap the FK controls of IK-posed limbs. A Rigify preset is included.
 - **Generate In-betweens**: the motion between your key poses, from a motion model running in its own process (Blender never freezes, and never loads the model itself). Your keys are never overwritten; the result comes as **Generated** keys. See [ROADMAP.md](ROADMAP.md) for what comes next.
+- **Prompt segments**: a track of prompts per character, one after the other, shown as bands in the Dope Sheet, the Timeline and the Graph Editor, and edited with the mouse like NLA strips; the whole track is generated at once, with the model's own transitions between the segments.
 
 ## Requirements
 
@@ -145,13 +146,22 @@ The model generates the motion from your first key pose to your last one. The re
 
 **Partial poses**: a frame where you keyed only some controls (an arm, a foot...) is a partial key pose. With Kimodo it pins only what you keyed: a hand or a foot where your pose puts it (and the hips, which Kimodo always pins on a constrained frame); keying the spine, the neck or the head pins the whole body. The rest of that frame is generated, and your keys stay as they are. Since your keys are FK rotations, the keyed limb follows the generated body on that frame: if the body moves a lot there, the hand or foot lands away from where you posed it. Key the body as well to keep the whole pose.
 
-Kimodo needs no key pose and generates up to 10 s; the panel says when the range is too long, or has fewer key poses than the backend needs (the interpolation test backend needs two). Frames carrying one of your keys are never written. Generating again replaces the Generated keys of the range and keeps yours. The whole generation is one undo step.
+Kimodo needs no key pose and generates up to 10 s (per segment with [prompt segments](#prompt-segments)); the panel says when the range is too long, or has fewer key poses than the backend needs (the interpolation test backend needs two). Frames carrying one of your keys are never written. Generating again replaces the Generated keys of the range and keeps yours. The whole generation is one undo step.
 
 - **Clear Generated Keys** (under Generate) removes what the add-on put on the character: its Generated keys, and the keys it made on the key poses (FK controls snapped to your IK pose, IK controls, an IK/FK switch keyed in FK), even on bones hidden in protected bone collections. A key it made that you changed since is yours, and stays. Your own keys stay, and a control left without any key goes back to its rest pose. One undo step.
 - The first generation starts the model (about 20 s with Kimodo); the model then stays loaded, and the next ones take about 3 s plus the time to write the keys (about 3 s for 120 frames, and as much again to snap the IK controls of limbs in IK). **Start** / **Stop** in the panel load the model ahead of time, or free its memory.
 - The model's skeleton is added to the scene as a hidden armature, in a **Retargetor Models** collection, next to your character.
-- Kimodo works at 30 fps and up to 10 s; other scene rates are handled (the key poses land exactly on the model's frames, the result is resampled to the scene's rate). A character facing any direction works.
+- Kimodo works at 30 fps and up to 10 s per prompt; other scene rates are handled (the key poses land exactly on the model's frames, the result is resampled to the scene's rate). A character facing any direction works.
 - **Editing a Generated key makes it yours**: as soon as you change a generated key (move it in the Graph Editor or the Dope Sheet, or key over it after posing the rig), it becomes a **Keyframe**, with the other channels of the same property on that frame, so the next generation keeps it and uses it as a key pose. Cancel the move (right click) and it goes back to Generated. You can also promote a generated key without changing it: **Key > Keyframe Type**.
+
+### Prompt segments
+
+A character can follow several prompts, one after the other: "walks forward" for 3 s, then "turns left and waves" for 2 s... Each **segment** has a start, an end, a prompt and a seed. The segments of a character follow each other with no gap, like a track: each one starts on the frame after the previous one ends, so the motion is always defined. Your key poses stay constraints inside them.
+
+- **Add Prompt Segment** (Generate panel) makes the first segment from the character's prompt, seed and range; the next ones are added at the end of the track (2 s, no prompt yet). With segments, the panel shows the **active** segment (its prompt, seed, start and end), the arrows go to the previous or next one, and **+**, **−** and the split button add one at the end, remove the active one (the one before takes its frames) or cut the segment under the current frame in two. Without segments, the prompt, seed and range are used again.
+- The segments are drawn as **bands** at the bottom of the **Dope Sheet**, the **Timeline** and the **Graph Editor**: the panel's character, then the other selected characters with segments, each with its name on the left. A band shows each prompt, its frames and seed, your key poses (small diamonds), and the transitions (a blend of colours just before each boundary). A hatched segment hasn't been generated, or was edited since the last generation. **View > Show Prompt Segments** hides them (they cover the bottom of the editor).
+- With the mouse, like NLA strips: **click** a segment to make it the active one (a click on a name makes that character the panel's), **drag** a boundary to move it (the neighbour adapts, the others don't move) or drag a segment to move both its boundaries; **Esc** or a right click cancels. **Double click** opens the segment's prompt, seed and frames; **right click** (the other button, with right-click select) opens its menu: Edit, Split at Current Frame, Add, Remove, Generate. **+** after the track adds a segment. Each change is one undo step.
+- **Generate In-betweens** then generates the whole track. Kimodo generates the segments one after the other in one pass, each one starting from the end of the previous one (its first 5 model frames, 0.17 s, follow it): the transitions are the model's. Each segment lasts 0.5 s at least and 10 s at most, but the track can be longer than 10 s. A model that can't chain prompts generates the segments one after the other, each one starting where the previous one ended, without transition.
 
 ### Preferences
 
@@ -183,6 +193,8 @@ Kimodo needs no key pose and generates up to 10 s; the panel says when the range
 | `ui.py` | Sidebar panels and lists |
 | `preferences.py` | Add-on preferences: backend, its settings, developer option |
 | `generation.py`, `generate_operators.py` | Generate In-betweens: key poses, request, result as Generated keys; operators |
+| `segment_track.py`, `segment_operators.py` | Prompt segments on the character, kept contiguous; add, remove, split, select |
+| `segment_draw.py`, `segment_mouse.py` | Prompt segments drawn in the animation editors, and handled with the mouse |
 | `core/` | Retargeting core, humanoid roles, neutral motion and skeleton types (see below) |
 | `backends/` | Motion model backends, each in its own folder (`kimodo/`, `interpolate/`), and the protocol with their worker processes |
 | `presets/` | Rig profile presets |

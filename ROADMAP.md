@@ -157,9 +157,11 @@ Order set after the first test on the user's own Rigify character (2026-11-02): 
 
 ### Phase 5: user experience
 
-- [ ] Prompt segments, visible in the timeline.
-- [ ] Regenerate a single segment (between two key poses, or one prompt segment) without touching the rest.
-- [ ] Transitions between segments (where two generations meet).
+First branch (`claude/phase5-segments-d54e2e`): prompt segments and the whole track. Results on the Phase 1 Rigify rig posed in IK, with Kimodo (`tests/blender/test_generate_kimodo.py segments`): three segments of 5 s ("walks forward and raises both arms", "turns left and waves", "jumps on the spot"), 15 s in all, the key poses 1, 61, 120 in the first one. One request; key poses untouched (0.0000°, 0.0001 cm); where the segments meet, the hips move 0.25 and 0.17 cm per frame at most and the limbs turn 11° and 3° per frame at most, against 7.3 cm and 23° for 99% of the frames inside the segments: no jump. Same seeds, same motion (0.002 cm). First generation 65 s (Kimodo started, 21 s of generation, 12 s writing the keys, 13 s snapping the IK controls of 450 frames), the next one 37 s (9 s of generation).
+
+- [x] Prompt segments, visible in the timeline: stored on the character, contiguous, drawn as bands in the Dope Sheet, Timeline and Graph Editor, edited with the mouse like NLA strips and in the Generate panel.
+- [ ] Regenerate a single segment (between two key poses, or one prompt segment) without touching the rest. Next branch.
+- [x] Transitions between segments: the model's own (Kimodo's multi-prompt generation), the whole track in one request; a backend that can't chain prompts gets one request per segment, without transition.
 - [ ] Root path drawing (when the backend supports it).
 - [ ] Ghost preview of the model's skeleton (nice-to-have).
 - [ ] Clear error messages, progress and cancel (a first version is in Phase 3).
@@ -219,6 +221,8 @@ Goal: a rig other than Rigify (Auto-Rig Pro, Mixamo, a studio's own rig...) is e
 | 2026-11-03 | New Phase 6, rig setup for any rig, after the user's testing: only Rigify sets itself up (its preset), and a profile set up by hand is too heavy. The release (documentation, packaging, final name) moves to a Phase 7 at the end: nothing is published before the setup works on other rigs. Phase 5 is now "user experience", its plan unchanged. |
 | 2026-11-04 | The IK snap-back stays the add-on's own, driven by the rig profile, rather than Rigify's IK->FK operators: measured on the Phase 1 rig, ours keeps the elbows and knees closer to the FK motion, is about 4 times faster and keeps the user's IK key poses without a jump; Rigify's exist only once the rig's script has run, are named after each rig, and their bake replaces the IK keys in its range (see the findings). |
 | 2026-11-04 | Clear Generated Keys removes the `Generated` keys and the user keys the add-on made itself on the key poses. Those are recorded on the character (`added_keys`, frames and values) as they are made, and removed only while unchanged: one the animator changed is theirs. A key the add-on changes again (a new snap, a quaternion sign flipped at the end of a generation) follows in the record unless the animator changed it first. Emptied F-curves are removed and their channels reset to rest. Keys made before the record existed can't be told from the animator's. |
+| 2026-11-05 | Prompt segments (Phase 5, first branch), the user's decisions: drawn by the add-on as bands per character in the Dope Sheet, Timeline and Graph Editor (not scene markers: shared by every character and mixed with the user's); contiguous, one track per character like Kimodo's prompt timeline, the key poses constraints inside them; this branch does the segments and the whole track with transitions, regenerating a single segment is the next branch. The look of the bands chosen on mockups drawn in the user's Blender (variant D: prompt, frames and seed, transition gradient, key poses, "modified" hatching). The bands are the UI's entry point, handled like NLA strips (click, drag, double click, menu); the Generate panel shows the active segment. No segment means one prompt as before; the first segment is made from the prompt, seed and range. One selected segment at a time; colours by position in the track. |
+| 2026-11-05 | Transitions between segments are the model's job, never the add-on's: no blending made by the add-on. A backend generating a track of prompts declares `Capabilities.prompt_segments` and gets it in one request (Kimodo: its multi-prompt generation); otherwise one request per segment, each starting on the previous segment's last frame, without transition. |
 
 ## Open questions
 - Kimodo's code and weights licence, and what it means for distributing the extension.
