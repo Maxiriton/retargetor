@@ -19,6 +19,8 @@ BAND_HEIGHT = 34.0
 BAND_GAP = 4.0
 STRIPE = 3.0  # colour stripe on top of a segment
 EDGE = 5.0  # a boundary can be grabbed this far on each side
+ADD_GAP = 4.0  # the "+" button after the panel's character's track
+ADD_WIDTH = 20.0
 TAG_PADDING = 6.0
 FONT = 11.0
 TAG_FONT = 10.0
@@ -46,6 +48,8 @@ class Band:
     y1: float
     tag_x0: float = 0.0  # the character's name tag, over the left of the band
     tag_x1: float = 0.0
+    add_x0: float = 0.0  # the "+" button adding a segment (the panel's character only; add_x0 == add_x1: none)
+    add_x1: float = 0.0
     bars: list = field(default_factory=list)
 
 
@@ -60,6 +64,9 @@ def band_layout(characters, frame_to_x, ui_scale=1.0, tag_x0=0.0, tag_width=None
         band = Band(name, target, y0, y0 + BAND_HEIGHT * ui_scale, tag_x0, tag_x0 + width)
         for index, (start, end) in enumerate(frames):
             band.bars.append(Bar(index, frame_to_x(start - 0.5), frame_to_x(end + 0.5)))
+        if target and band.bars:
+            band.add_x0 = band.bars[-1].x1 + ADD_GAP * ui_scale
+            band.add_x1 = band.add_x0 + ADD_WIDTH * ui_scale
         bands.append(band)
     return bands
 
@@ -67,13 +74,16 @@ def band_layout(characters, frame_to_x, ui_scale=1.0, tag_x0=0.0, tag_width=None
 def hit_test(bands, x, y, ui_scale=1.0):
     """(character, segment index, part) under the region point (x, y), or None. part: 'START' or 'END' near a
     boundary of the segment (EDGE pixels), else 'BODY'. Between two segments, the boundary belongs to the segment
-    after it ('START'); the track's end is the last segment's 'END'. On the name tag: (character, None, 'TAG')."""
+    after it ('START'); the track's end is the last segment's 'END'. On the name tag: (character, None, 'TAG'); on
+    the "+" button: (character, None, 'ADD')."""
     edge = EDGE * ui_scale
     for band in bands:
         if not band.y0 <= y <= band.y1 or not band.bars:
             continue
         if band.tag_x0 <= x <= band.tag_x1:
             return band.character, None, 'TAG'
+        if band.add_x0 < band.add_x1 and band.add_x0 <= x <= band.add_x1:
+            return band.character, None, 'ADD'
         last = band.bars[-1]
         for bar in band.bars:
             if abs(x - bar.x0) <= edge:
@@ -363,6 +373,13 @@ def draw_bands():
                            (x - size, band.y0 + lift)]
                 _polygon(diamond, (0.95, 0.95, 0.95, dim))
                 _outline(diamond, (0.0, 0.0, 0.0, 0.8 * dim), 1.0)
+        if band.add_x0 < band.add_x1 and band.add_x0 < width:
+            add_hovered = hover is not None and hover[0] == rig.name and hover[2] == 'ADD'
+            box = _rounded(band.add_x0, band.y0, band.add_x1, band.y1, 4 * ui)
+            _polygon(box, (0.3, 0.3, 0.3, 0.95) if add_hovered else (0.18, 0.18, 0.18, 0.85))
+            cx, cy, arm = (band.add_x0 + band.add_x1) / 2, (band.y0 + band.y1) / 2, 5 * ui
+            _rect(cx - arm, cy - 0.75 * ui, cx + arm, cy + 0.75 * ui, (1.0, 1.0, 1.0, 0.8))
+            _rect(cx - 0.75 * ui, cy - arm, cx + 0.75 * ui, cy + arm, (1.0, 1.0, 1.0, 0.8))
         # The character's name, held at the left edge
         tag_hovered = hover is not None and hover[0] == rig.name and hover[2] == 'TAG'
         _polygon(_rounded(band.tag_x0, band.y0, band.tag_x1, band.y1, 3 * ui, left=False),
