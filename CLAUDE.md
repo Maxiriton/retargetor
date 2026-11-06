@@ -23,13 +23,13 @@ Retargetor is a Blender extension (Blender 5.2+) that retargets animation betwee
 | `profile_operators.py` | Rig profile: presets, roles, JSON, Snap FK to IK |
 | `ui.py` | Sidebar panels and lists (Retarget, Rig Profile, Generate); the animation editors' header (model state, Generate or progress, bands toggle, Retargetor menu) |
 | `preferences.py` | Add-on preferences: active backend, developer option, each backend's settings (declared by the backend) |
-| `generation.py` | Generate In-betweens step by step (`GenerationTask`): key poses, model armature, request, result baked as `GENERATED` keys (`MotionWriter`), IK controls snapped back (`IkSnapWriter`) |
+| `generation.py` | Generate In-betweens step by step (`GenerationTask`): key poses, model armature, request, result baked as `GENERATED` keys (`MotionWriter`), IK controls snapped back (`IkSnapWriter`); the whole track or one segment alone (`segment_chunk`: the motion around it as context) |
 | `generated_keys.py` | Edited `GENERATED` keys become Keyframes as soon as they are edited: values recorded after each generation, compared by a depsgraph handler. Also records the user keys the add-on makes itself (FK snap...), and `clear()` removes both |
 | `segment_track.py` | A character's prompt segments (`Object.retargetor.segments`) read and written as a `core.segments` track, kept contiguous when a start or end is edited; generated state |
 | `segment_operators.py` | Add, remove, split, select prompt segments, previous / next |
 | `segment_draw.py` | Prompt segments drawn as bands in the Dope Sheet and Graph Editor (layout and hit test as plain functions), View menu toggle |
 | `segment_mouse.py` | The bands handled with the mouse (keymap items passing the event through off the bands): hover, click, drag, popup, menu |
-| `generate_operators.py` | Generate (modal, Esc cancels; `execute` blocks, for scripts and tests), cancel, Clear Generated Keys, start / stop the model |
+| `generate_operators.py` | Generate and Regenerate Segment (modal, Esc cancels; `execute` blocks, for scripts and tests), cancel, Clear Generated Keys, start / stop the model |
 | `core/retarget/` | `pairs.py` (`BonePair`, no `bpy`), `snap.py` (`Retargeter`: snap and bake on given frames, offsets computed from the rigs, each bone keyed in its own rotation mode), `fk_snap.py` (FK controls snapped to the IK pose before generating, IK controls snapped to the generated FK pose after) |
 | `core/roles.py`, `core/profile.py` | Humanoid roles and the rig profile in neutral form, `compose()` (no `bpy`) |
 | `core/segments.py` | `PromptSegment` and the contiguous track: move a boundary or a segment, split, append, remove (no `bpy`) |
