@@ -105,6 +105,7 @@ def main():
     env = dict(os.environ, RETARGETOR_SPIKES=args.spikes)
     with tempfile.TemporaryDirectory(prefix="retargetor_tests_") as scratch:
         results["panel"] = run_blender(args.blender, "test_panel.py", [scratch], env=env)
+        results["segments"] = run_blender(args.blender, "test_segments.py", env=env)
         results["pose_io"] = run_blender(args.blender, "test_pose_io.py", env=env)
         results["skeleton_io"] = run_blender(args.blender, "test_skeleton_io.py", env=env)
         lib_dir = os.path.join(scratch, "library")

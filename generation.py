@@ -229,12 +229,14 @@ def find_key_frames(rig, rig_profile):
 
 
 def generation_range(rig, rig_profile):
-    """(start frame, end frame, key frames between them) of the character's next generation: from the first to
-    the last key pose, or its custom range (key poses outside it are ignored).
+    """(start frame, end frame, key frames between them) of the character's next generation: its prompt segments'
+    track, else from the first to the last key pose, or its custom range (key poses outside are ignored).
     Raises ValueError if the key poses don't make a range."""
     key_frames = find_key_frames(rig, rig_profile)
     state = rig.retargetor
-    if state.range_mode == 'CUSTOM':
+    if len(state.segments) > 0:
+        start, end = state.segments[0].frame_start, state.segments[-1].frame_end
+    elif state.range_mode == 'CUSTOM':
         start, end = state.range_start, state.range_end
     else:
         if len(key_frames) < 2:

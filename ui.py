@@ -251,13 +251,17 @@ class RETARGETOR_PT_GeneratePanel(Panel):
         if (active is not None and active != rig and active.type == 'ARMATURE'
                 and active != rig.retargetor.model_armature):
             layout.label(text=f"The active armature is '{active.name}', not the character", icon='ERROR')
-        caps = backend.capabilities
-        if caps.prompt:
-            layout.prop(state, "prompt", text="")
-        if caps.seed:
-            layout.prop(state, "seed")
-
-        problem = draw_range(context, layout, rig, state, backend)
+        if len(state.segments) > 0:
+            problem = draw_segments(context, layout, rig, state, backend)
+        else:
+            caps = backend.capabilities
+            if caps.prompt:
+                layout.prop(state, "prompt", text="")
+            if caps.seed:
+                layout.prop(state, "seed")
+            problem = draw_range(context, layout, rig, state, backend)
+            if caps.prompt:
+                layout.operator("retargetor.segment_add", icon='SEQ_STRIP_META')
 
         task = generation.current_task
         if task is not None:
@@ -317,6 +321,63 @@ def draw_range(context, layout, rig, state, backend):
     box.label(text=f"{len(key_frames)} key poses" + (f": {keys}" if key_frames else " (prompt only)"),
               icon='KEYFRAME')
     problem = backend.range_problem(start, end, fps, len(key_frames))
+    _error(box, problem)
+    return problem
+
+
+def draw_segments(context, layout, rig, state, backend):
+    """The active prompt segment (chosen in the timeline, or with the arrows), the buttons editing the track, and
+    why the backend can't generate it ("" if it can)"""
+    from . import segment_track
+    count = len(state.segments)
+    item = segment_track.active_segment(state)
+    row = layout.row(align=True)
+    row.operator("retargetor.segment_step", text="", icon='TRIA_LEFT').step = -1
+    row.label(text=f"Segment {state.segments_active_index + 1} / {count}", icon='SEQ_STRIP_META')
+    row.operator("retargetor.segment_step", text="", icon='TRIA_RIGHT').step = 1
+    row.separator()
+    row.operator("retargetor.segment_add", text="", icon='ADD')
+    row.operator("retargetor.segment_remove", text="", icon='REMOVE')
+    row.operator("retargetor.segment_split", text="", icon='MOD_EDGESPLIT')
+    caps = backend.capabilities
+    if item is not None:
+        if caps.prompt:
+            layout.prop(item, "prompt", text="")
+        else:
+            layout.label(text=f"{backend.label} takes no prompt", icon='INFO')
+        row = layout.row(align=True)
+        row.prop(item, "frame_start")
+        row.prop(item, "frame_end")
+        if caps.seed:
+            layout.prop(item, "seed")
+        state_label = {'NEW': "Not generated yet", 'MODIFIED': "Edited since the last generation"}
+        label = state_label.get(segment_track.segment_state(item))
+        if label:
+            layout.label(text=label, icon='INFO')
+
+    box = layout.box()
+    scene = context.scene
+    fps = segment_track.scene_fps(scene)
+    track = segment_track.read_track(state)
+    start, end = track[0].start_frame, track[-1].end_frame
+    from .segment_operators import character_profile
+    rig_profile = character_profile(rig)
+    if rig_profile is None:
+        problem = "No rig profile"
+        _error(box, problem)
+        return problem
+    try:
+        key_frames = [f for f in generation.find_key_frames(rig, rig_profile) if start <= f <= end]
+    except ValueError as e:
+        _error(box, str(e))
+        return str(e)
+    keys = ", ".join(str(f) for f in key_frames[:6]) + (" ..." if len(key_frames) > 6 else "")
+    box.label(text=f"Track: frames {start}-{end} ({(end - start + 1) / fps:.1f} s), {count} segments", icon='TIME')
+    box.label(text=f"{len(key_frames)} key poses" + (f": {keys}" if key_frames else " (prompts only)"),
+              icon='KEYFRAME')
+    if not caps.prompt_segments and count > 1:
+        box.label(text=f"{backend.label}: segments generated one by one, no transition", icon='INFO')
+    problem = backend.segments_problem(track, fps, key_frames)
     _error(box, problem)
     return problem
 
