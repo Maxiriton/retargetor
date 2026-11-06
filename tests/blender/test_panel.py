@@ -18,8 +18,11 @@ from bootstrap import angle_deg, bone_direction  # noqa: E402
 LIMBS = [("Arm.L", "arm.L"), ("Forearm.L", "forearm.L"), ("Leg.L", "leg.L"), ("Shin.L", "shin.L")]
 
 
+ICONS = set(bpy.types.UILayout.bl_rna.functions["label"].parameters["icon"].enum_items.keys())
+
+
 class CheckingLayout:
-    """Stands in for a UILayout: every property and operator the panel uses must exist."""
+    """Stands in for a UILayout: every property, operator and icon the panel uses must exist."""
 
     def __init__(self, errors):
         self.errors = errors
@@ -30,8 +33,21 @@ class CheckingLayout:
 
     row = column = box = split = _sub
 
-    def label(self, **_kwargs):
+    def _check_icon(self, kwargs):
+        icon = kwargs.get("icon")
+        if icon is not None and icon not in ICONS:
+            self.errors.append(f"unknown icon {icon}")
+
+    def label(self, **kwargs):
+        self._check_icon(kwargs)
+
+    def progress(self, **_kwargs):
         pass
+
+    def menu(self, menu, **kwargs):
+        self._check_icon(kwargs)
+        if not hasattr(bpy.types, menu):
+            self.errors.append(f"unknown menu {menu}")
 
     def separator(self, **_kwargs):
         pass
@@ -40,14 +56,16 @@ class CheckingLayout:
         if data is None or name not in data.bl_rna.properties:
             self.errors.append(f"unknown property {name} on {data}")
 
-    def prop(self, data, name, **_kwargs):
+    def prop(self, data, name, **kwargs):
         self._check_prop(data, name)
+        self._check_icon(kwargs)
 
     def prop_search(self, data, name, search_data, search_name, **_kwargs):
         self._check_prop(data, name)
         self._check_prop(search_data, search_name)
 
-    def operator(self, idname, **_kwargs):
+    def operator(self, idname, **kwargs):
+        self._check_icon(kwargs)
         module, name = idname.split(".")
         if not hasattr(getattr(bpy.ops, module), name) or getattr(getattr(bpy.ops, module), name).idname() is None:
             self.errors.append(f"unknown operator {idname}")
@@ -63,10 +81,10 @@ class CheckingLayout:
             ui_list.draw_item(None, bpy.context, CheckingLayout(self.errors), data, item, 0, active_data, active_name, index)
 
 
-def draw_panels():
+def draw_panels(panels=None):
     errors = []
     from retargetor import ui
-    for panel in (ui.RETARGETOR_PT_RetargetPanel, ui.RETARGETOR_PT_RigProfilePanel):
+    for panel in panels or (ui.RETARGETOR_PT_RetargetPanel, ui.RETARGETOR_PT_RigProfilePanel):
         fake = type("Panel", (), {"layout": CheckingLayout(errors)})()
         panel.draw(fake, bpy.context)
     return errors

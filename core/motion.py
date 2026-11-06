@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .segments import PromptSegment, check_track
+
 Quat = tuple[float, float, float, float]
 Vec3 = tuple[float, float, float]
 
@@ -98,6 +100,8 @@ class GenerationRequest:
     key_poses: {Blender frame: Pose}, in the model's skeleton (its joint names). May be empty (prompt only).
     origin: the character's pose on start_frame (a key pose there, or wherever the character stands), in the
     model's skeleton. Not a constraint: it tells where the motion starts and which way the character faces.
+    segments: prompt segments (core.segments) covering start_frame to end_frame exactly, for a backend generating a
+    track of prompts in one pass (Capabilities.prompt_segments); prompt and seed are then unused. Empty: one prompt.
     """
     start_frame: int
     end_frame: int
@@ -106,6 +110,7 @@ class GenerationRequest:
     prompt: str = ""
     seed: int | None = None
     origin: Pose | None = None
+    segments: list[PromptSegment] = field(default_factory=list)
 
     def __post_init__(self):
         if self.end_frame < self.start_frame:
@@ -115,6 +120,12 @@ class GenerationRequest:
         outside = sorted(f for f in self.key_poses if not self.start_frame <= f <= self.end_frame)
         if outside:
             raise ValueError(f"Key poses outside the range {self.start_frame}-{self.end_frame}: {outside}")
+        if self.segments:
+            check_track(self.segments)
+            first, last = self.segments[0].start_frame, self.segments[-1].end_frame
+            if (first, last) != (self.start_frame, self.end_frame):
+                raise ValueError(f"The segments cover frames {first}-{last}, the request {self.start_frame}-"
+                                 f"{self.end_frame}.")
 
     @property
     def duration(self):
@@ -130,6 +141,7 @@ class GenerationRequest:
             "prompt": self.prompt,
             "seed": self.seed,
             "origin": self.origin.to_dict() if self.origin is not None else None,
+            "segments": [segment.to_dict() for segment in self.segments],
         }
 
     @classmethod
@@ -142,4 +154,5 @@ class GenerationRequest:
             prompt=data.get("prompt", ""),
             seed=data.get("seed"),
             origin=Pose.from_dict(data["origin"]) if data.get("origin") is not None else None,
+            segments=[PromptSegment.from_dict(s) for s in data.get("segments") or []],
         )

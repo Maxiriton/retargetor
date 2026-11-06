@@ -351,6 +351,31 @@ def main():
     checks.check("at most 10 s" in get("kimodo").range_problem(1, 301, 30.0, 0), "Kimodo: 10 s at most")
     state.range_mode = 'KEY_POSES'
 
+    # 2c. Prompt segments with a backend generating one request per segment (the interpolation backend): each one
+    # starts from the previous one's last frame, without transition
+    from retargetor import segment_track
+    from retargetor.core.segments import PromptSegment
+    segment_track.write_track(state, [PromptSegment(1, 61, "walks", 1), PromptSegment(62, 120, "runs", 2)])
+    keys_before = keys_by_type(rig, generation)
+    task = generation.GenerationTask()
+    checks.check(task.run(bpy.context, rig), "generation of two prompt segments, one after the other")
+    checks.check([(c.request_start, c.write_start, c.write_end) for c in task.chunks] == [(1, 1, 61), (61, 62, 120)],
+                 "one request per segment, the second from the first one's last frame")
+    checks.check(task.request.start_frame == 61 and not task.request.segments, "the last request: segment 2 alone")
+    after_keys = keys_by_type(rig, generation)
+    checks.check(user_keys(after_keys) == user_keys(keys_before), "user keys untouched by the segments")
+    frames = after_keys[('pose.bones["upper_arm_fk.L"].rotation_quaternion', 0)]
+    generated = {f for f, (_v, t) in frames.items() if t == 'GENERATED' and f <= 120}  # 121-150: section 2b
+    checks.check(generated == set(range(1, 121)) - {1, 61, 120}, "GENERATED keys on both segments")
+    checks.check(task.result[0] == 117, f"117 frames written ({task.result})")
+    checks.check(all(segment_track.segment_state(item) == 'GENERATED' for item in state.segments),
+                 "the segments are marked generated")
+    checks.check(draw_generate_panel() == [], "Generate panel draws the segments")
+    kimodo_chunks = generation.generation_chunks(state, get("kimodo"), 1, 120)
+    checks.check(len(kimodo_chunks) == 1 and len(kimodo_chunks[0].segments) == 2,
+                 "a backend generating segments in one pass gets them in one request")
+    state.segments.clear()
+
     # 3. An arm in IK (its IK controls at rest): its FK controls are snapped to the IK pose on the key poses,
     # it is in FK while generating, then its IK controls are snapped to the motion and it is back in IK (the switch
     # isn't animated: set once). tests/blender/test_generate_ik.py checks the IK snap on a real IK pose.

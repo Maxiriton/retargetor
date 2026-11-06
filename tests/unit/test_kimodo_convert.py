@@ -86,6 +86,21 @@ class TestFrameRates(unittest.TestCase):
         timing = convert.model_timing(1, 96, [1, 96], 24.0, 30.0)
         self.assertEqual((timing.key_indices, timing.count, timing.anchor_indices), ([0, 119], 120, [0, 119]))
 
+    def test_segment_frame_counts(self):
+        from core.segments import PromptSegment
+        # 24 fps, 3 segments of 2 s each: 60 model frames each, 180 in all
+        segments = [PromptSegment(1, 48), PromptSegment(49, 96), PromptSegment(97, 144)]
+        timing = convert.model_timing(1, 144, [], 24.0, 30.0)
+        counts = convert.segment_frame_counts(segments, timing, 5)
+        self.assertEqual(counts, [60, 60, 60])
+        self.assertEqual(sum(counts), timing.count)
+        # Boundaries follow the stretched time between key poses
+        timing = convert.model_timing(1, 100, [1, 100], 30.0, 30.0)
+        self.assertEqual(convert.segment_frame_counts([PromptSegment(1, 50), PromptSegment(51, 100)], timing, 5),
+                         [50, 50])
+        with self.assertRaises(ValueError):
+            convert.segment_frame_counts([PromptSegment(1, 95), PromptSegment(96, 100)], timing, 5)
+
     def test_resample(self):
         rotations = np.stack([np.tile(turn_z(0.1 * i), (2, 1)) for i in range(5)])
         positions = np.arange(15, dtype=float).reshape(5, 3)

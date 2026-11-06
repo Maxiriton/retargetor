@@ -15,6 +15,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 from bpy.types import PropertyGroup
 
+from . import segment_track
 from .core import profile as core_profile
 from .core.retarget.pairs import BonePair, IDENTITY_QUATERNION
 from .core.roles import ROLES_BY_ID
@@ -102,6 +103,20 @@ class RTGTR_BonePairItem(PropertyGroup):
         return BonePair(self.src_name, self.target_name, self.offset_mode, self.use_translation, correction)
 
 
+class RTGTR_PromptSegment(PropertyGroup):
+    """One prompt segment of a character's track (segment_track keeps the track contiguous)"""
+    prompt: StringProperty(name="Prompt", description="Text describing the motion of this segment",
+                           update=segment_track.update_redraw, override=OVERRIDABLE)
+    seed: IntProperty(name="Seed", default=0, min=0, update=segment_track.update_redraw,
+                      description="Same seed, same key poses and same prompt: same motion", override=OVERRIDABLE)
+    frame_start: IntProperty(name="Start", description="First frame of the segment (the previous one ends before it)",
+                             update=segment_track.update_start, override=OVERRIDABLE)
+    frame_end: IntProperty(name="End", description="Last frame of the segment (the next one starts after it)",
+                           update=segment_track.update_end, override=OVERRIDABLE)
+    # segment_track.generated_signature() of the segment at its last generation ("" if never generated)
+    generated: StringProperty(name="Generated", options={'HIDDEN'}, override=OVERRIDABLE)
+
+
 class RTGTR_CharacterState(PropertyGroup):
     """Retargeting state of one character (the target armature object)"""
     source: PointerProperty(type=bpy.types.Object, name="Source Armature", poll=is_armature,
@@ -118,7 +133,7 @@ class RTGTR_CharacterState(PropertyGroup):
     recording_initial_rotation: FloatVectorProperty(
         name="Initial Rotation", description="Rotation of the bone when the recording started",
         size=4, default=IDENTITY_QUATERNION, override=OVERRIDABLE)
-    # Generation (one prompt and one seed per character for now)
+    # Generation with one prompt (no prompt segments)
     prompt: StringProperty(name="Prompt", description="Text describing the motion to generate",
                            override=OVERRIDABLE)
     seed: IntProperty(name="Seed", default=0, min=0,
@@ -129,6 +144,11 @@ class RTGTR_CharacterState(PropertyGroup):
                              override=OVERRIDABLE)
     range_duration: IntProperty(name="Duration", default=120, min=2,
                                 description="Number of frames of the custom range", override=OVERRIDABLE)
+    # Prompt segments: a track generated as a whole (none: the prompt, seed and range above)
+    segments: CollectionProperty(type=RTGTR_PromptSegment, name="Prompt Segments",
+                                 override=OVERRIDABLE_COLLECTION)
+    segments_active_index: IntProperty(name="Active Segment", default=0, min=0,
+                                       update=segment_track.update_redraw, override=OVERRIDABLE)
     model_armature: PointerProperty(type=bpy.types.Object, name="Model Armature", poll=is_armature,
                                     description="The motion model's skeleton, built by the add-on for this character",
                                     override=OVERRIDABLE)
@@ -288,6 +308,7 @@ class RTGTR_RigProfile(PropertyGroup):
 
 classes = (
     RTGTR_BonePairItem,
+    RTGTR_PromptSegment,
     RTGTR_CharacterState,
     RTGTR_Correction,
     RTGTR_RoleBinding,

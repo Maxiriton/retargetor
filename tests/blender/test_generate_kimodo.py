@@ -1,7 +1,7 @@
 """Generate In-betweens with Kimodo (needs the Kimodo venv and a CUDA GPU), on the Phase 1 Rigify rig.
 
     blender -b --factory-startup <rig_keyposes.blend> --python tests/blender/test_generate_kimodo.py --
-        <base|heading|fps24|range|ik|partial> <kimodo python> <out dir> [<spike rig_result.json dump>]
+        <base|heading|fps24|range|ik|partial|segments> <kimodo python> <out dir> [<spike rig_result.json dump>]
 
 base:    key poses on frames 1, 61, 120 at 30 fps, prompt and seed of the Phase 1 spike. Writes the rig's motion
          to <out dir>/base.json. Compared with the spike's result if its dump is given (tests/run_tests.py
@@ -16,6 +16,8 @@ partial: after the base generation, the left arm raised and keyed alone on frame
          as an animator would): a partial key pose, Kimodo's left hand end-effector.
 range:   custom ranges: the prompt alone (no key pose, the character turned 90 degrees), starting from one key
          pose, ending on one key pose.
+segments: on rig_keyposes_ik.blend, three prompt segments of 5 s (15 s in all, past Kimodo's 10 s), the key poses in
+         the first one: one request, key poses untouched, no jump where the segments meet, same seeds same motion.
 """
 import json
 import math
@@ -430,6 +432,69 @@ def run_partial(checks, kimodo_python):
     checks.check(arm_key_values(rig) == arm_keys, "partial: the arm's keys on frame 90 are untouched")
 
 
+SEGMENTS = [(1, 150, "A person walks forward and raises both arms", 1), (151, 300, "A person turns left and waves", 2),
+            (301, 450, "A person jumps on the spot", 3)]
+
+
+def frame_steps(rig, frames):
+    """{frame: (hips movement in cm, worst ORG bone direction change in degrees) from the frame before}"""
+    snapshot = motion_snapshot(rig, [frames[0] - 1] + list(frames))
+    steps = {}
+    for frame in frames:
+        before, after = snapshot[frame - 1], snapshot[frame]
+        hips = (after["ORG-spine"][0] - before["ORG-spine"][0]).length * 100
+        turn = max(angle_deg(before[n][1], after[n][1]) for n in after)
+        steps[frame] = (hips, turn)
+    return steps
+
+
+def run_segments(checks, kimodo_python):
+    rig = setup(kimodo_python)
+    from retargetor import segment_track
+    from retargetor.core.segments import PromptSegment
+    state = rig.retargetor
+    segment_track.write_track(state, [PromptSegment(*segment) for segment in SEGMENTS])
+    key_frames = [1, 61, 120]
+    before = motion_snapshot(rig, key_frames)
+    task = generate(checks, "three prompt segments, 15 s (starts Kimodo)")
+    checks.check(len(task.chunks) == 1 and len(task.request.segments) == 3 and (task.start_frame, task.end_frame)
+                 == (1, 450), "one request for the three segments, frames 1-450")
+    checks.check(task.key_frames == key_frames, f"the key poses of the first segment ({task.key_frames})")
+    key_poses_kept(checks, rig, before, "segments")
+    checks.check(generated_frames(rig) >= set(range(1, 451)) - set(key_frames), "GENERATED keys on the whole track")
+    checks.check(all(segment_track.segment_state(item) == 'GENERATED' for item in state.segments),
+                 "the segments are marked generated")
+
+    # Where the segments meet, the motion moves no more than inside them
+    steps = frame_steps(rig, list(range(2, 451)))
+    boundaries = [151, 301]
+    inside = [step for frame, step in steps.items() if all(abs(frame - b) > 6 for b in boundaries)]
+    hips_limit = sorted(h for h, _t in inside)[int(0.99 * len(inside))]
+    turn_limit = sorted(t for _h, t in inside)[int(0.99 * len(inside))]
+    for boundary in boundaries:
+        near = [steps[f] for f in range(boundary - 6, boundary + 7)]
+        hips, turn = max(h for h, _t in near), max(t for _h, t in near)
+        print(f"FINDING segments: around frame {boundary}, hips {hips:.2f} cm and limbs {turn:.2f} deg per frame at "
+              f"most (99% of the frames inside the segments: {hips_limit:.2f} cm, {turn_limit:.2f} deg)")
+        checks.below(hips, 1.5 * hips_limit, f"no hips jump where the segments meet, frame {boundary} (cm/frame)")
+        checks.below(turn, 1.5 * turn_limit, f"no limb jump where the segments meet, frame {boundary} (deg/frame)")
+    scene = bpy.context.scene
+    scene.frame_set(1)
+    start = rig.matrix_world @ rig.pose.bones["ORG-spine"].head
+    for frame in (150, 300, 450):
+        scene.frame_set(frame)
+        hips = rig.matrix_world @ rig.pose.bones["ORG-spine"].head
+        print(f"FINDING segments: hips on frame {frame}: {((hips - start) * Vector((1, 1, 0))).length:.2f} m from the "
+              f"start, {hips.z:.2f} m high")
+
+    # Same seeds, same key poses, same prompts: the same motion (the model is loaded now)
+    first = motion_snapshot(rig, [75, 225, 375])
+    generate(checks, "three prompt segments again")
+    _ma, worst_angle, _md, worst_dist = compare(first, motion_snapshot(rig, [75, 225, 375]),
+                                                [(f, f) for f in (75, 225, 375)])
+    checks.below(worst_dist, 0.1, "same seeds: same motion, worst head (cm)")
+
+
 def main():
     args = bootstrap.script_args()
     mode, kimodo_python, out_dir = args[0], args[1], args[2]
@@ -448,6 +513,8 @@ def main():
             run_ik(checks, kimodo_python, out_dir)
         elif mode == "partial":
             run_partial(checks, kimodo_python)
+        elif mode == "segments":
+            run_segments(checks, kimodo_python)
     finally:
         from retargetor.backends import registry
         registry.stop_all()

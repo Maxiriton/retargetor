@@ -44,10 +44,15 @@ The animation itself is the source of truth: key poses are not stored in a separ
 - **Clearing**: one operator removes everything the add-on put on a character: the `Generated` keys, and the user keys it made itself on the key poses (snapped FK keys, IK controls keyed as they are, switch keys). Those are recorded on the character when they are made (frames and values), and removed only while they still have the recorded value: one the animator changed is theirs. A key the add-on changes again later (a new snap, a quaternion sign flipped) follows in the record, unless the animator changed it first. F-curves left empty are removed and their channels put back to rest. Needed because the controls the add-on keys are often on hidden, protected bone collections (Rigify's FK controls when the animator works in IK).
 - Takes or variations (comparing several results) are not planned for now. If they come later, they must keep the single-action rule, for example by keeping alternate results aside and swapping them into a segment.
 
-## Text prompts (later)
+## Prompt segments
 
-- The user defines **segments with a prompt**, and they must be **visible in the timeline**.
-- Not designed yet. To keep in mind for the data model: a segment has a start, an end, a prompt (and probably a seed), and is stored with the character.
+- A character has a **track of prompt segments**: each segment has a start, an end, a prompt and a seed, stored on the character (`object.retargetor.segments`). The segments are **contiguous**, like Kimodo's prompt timeline: each one starts on the frame after the previous one ends, so the motion is never undefined. The user's key poses stay constraints inside them.
+- **No segment: one prompt**, as before (the character's prompt, seed and range, Key Poses or Custom). The first segment is made from them; with segments, the track is the generation's range.
+- **Editing keeps the track contiguous** (`core/segments.py`, no `bpy`): moving a boundary changes the two segments around it only (the key poses stay where they are in time); moving a segment moves both its boundaries; removing one gives its frames to the one before (the one after, for the first); splitting keeps the prompt and seed on both parts. A segment lasts 0.5 s at least (room for a backend's transition) and the backend's longest motion at most (Kimodo 10 s): the track itself has no limit. A move is clamped to these limits; a segment already outside them may stay as it is, not get further out.
+- **Shown in the animation editors**, not as scene markers: a band per character at the bottom of the Dope Sheet (Timeline included) and Graph Editor main regions, drawn by the add-on (`segment_draw.py`): the panel's character, then the other selected characters with segments. Each segment shows its prompt, frames and seed; the key poses are small diamonds; a gradient before each boundary shows the backend's transition; a hatched segment was never generated or was edited since (frames, prompt or seed compared with what the last generation recorded). The look was chosen on mockups drawn in the user's Blender (variant D). **View > Show Prompt Segments** hides them (`scene.retargetor_show_segments`): a band always covers the bottom channels.
+- **The bands are the UI's entry point, handled like NLA strips** (`segment_mouse.py`): add-on keymap items in the Dope Sheet and Graph Editor keymaps run an operator on every click and mouse move of the main region, which hit-tests the bands (the same layout function as the drawing) and lets the event through off them. Click selects (on a name: that character becomes the panel's), drag moves a boundary or a whole segment (Esc cancels), double click opens a popup (prompt, seed, frames; no text editing in the band itself), the other mouse button opens the segment's menu, "+" after the track adds one. One selected segment at a time. The Generate panel shows the active segment, with previous / next arrows.
+- **Everything is reachable from the animation editors** (the user's request after the first test): their headers show the model's state and Generate, or the progress bar while generating, an eye toggling the bands (they were hidden once without the user noticing why) and a Retargetor menu (generate, segments, Clear Generated Keys, the model's start / stop and errors). The Generate panel stays.
+- **Colours** follow the position in the track (blue, orange, green, purple). A colour per segment may come later.
 
 ## Root motion
 
@@ -68,7 +73,8 @@ The animation itself is the source of truth: key poses are not stored in a separ
 ## Continuity around key poses
 
 - Left to the backend: Kimodo's post-processing hits the key poses exactly (checked in Phase 3). The add-on does not measure or blend the motion around them.
-- Where two generations meet (regenerating one segment, prompt segments) is a Phase 5 topic.
+- **Transitions between prompt segments are the model's, never the add-on's** (the user's decision: blending motions is not the add-on's job). A backend declaring `Capabilities.prompt_segments` gets the whole track in one request (`GenerationRequest.segments`) and makes its own transitions; Kimodo uses its multi-prompt generation: the segments one after the other, each one's first 5 model frames constrained by the end of the previous one, the key poses cropped to each segment, post-processed per segment. `Capabilities.transition_duration` only tells the timeline where to draw them. A backend without it gets one request per segment, each starting on the previous segment's last frame (its origin: where and which way the character stands there), with no transition: the pose may jump at the boundary.
+- Regenerating a single segment (next branch) will need the motion around it as a constraint: to be done by the backend too.
 
 ## Characters
 
@@ -79,7 +85,7 @@ The animation itself is the source of truth: key poses are not stored in a separ
 | Where | What | Why |
 |---|---|---|
 | **Armature data** (`bpy.types.Armature`) | The **rig profile**: per role, the bone that is read and the control that is written (they differ on controller rigs, e.g. Rigify `ORG-upper_arm.L` / `upper_arm_fk.L`), offset mode, Use Translation flags, corrections per backend | It all depends on the bones, which belong to the Armature data. Objects sharing an armature share its profile. |
-| **Object** (the character in the shot) | Prompt and seed (prompt segments later), link to its model armature | Varies per character, so several characters can live in one scene. |
+| **Object** (the character in the shot) | Prompt, seed and range, or its prompt segments (start, end, prompt, seed, what was last generated), link to its model armature | Varies per character, so several characters can live in one scene. |
 | **Add-on preferences** | Active backend and each backend's settings (Kimodo: Python path, model), developer option | Depends on the machine, not on the file. |
 | **JSON** | Export / import of a rig profile | Reuse a mapping on another similar rig. |
 | **Computed, not stored** | Translation scale | Depends on both skeletons together. |

@@ -3,6 +3,9 @@
 MODEL_FPS = 30.0
 # Longest motion Kimodo's own demo generates, in seconds
 MAX_DURATION = 10.0
+# Frames at the start of each prompt segment constrained by the end of the previous one (Kimodo's multi-prompt
+# default, num_transition_frames)
+TRANSITION_FRAMES = 5
 DEFAULT_MODEL = "Kimodo-SOMA-RP-v1.1"
 
 ROOT_JOINT = "Hips"
