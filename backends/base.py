@@ -21,10 +21,14 @@ class Capabilities:
     min_key_poses: fewest key poses in a request (0: the prompt alone is enough).
     partial_poses: honours core.motion.Pose.constrained_joints (constrains only what the animator keyed);
     otherwise every key pose is sent whole.
+    prompt_segments: generates a track of prompt segments (GenerationRequest.segments) in one pass, with its own
+    transitions between them; max_duration then applies to each segment. Otherwise the add-on generates the
+    segments one after the other, each one a request of its own, without transition.
     """
     prompt: bool = False
     min_key_poses: int = 2
     partial_poses: bool = False
+    prompt_segments: bool = False
     seed: bool = False
     max_duration: float | None = None
     native_fps: float | None = None
@@ -69,9 +73,39 @@ class Backend:
                     f"({key_count} in frames {start_frame}-{end_frame}).")
         return ""
 
+    def segments_problem(self, segments, fps, key_frames):
+        """Why the backend can't generate this track of prompt segments (core.segments, contiguous) with key poses
+        on key_frames, or "" if it can. With prompt_segments one request covers the track: the maximum duration
+        applies to each segment, the fewest key poses to the whole track. Otherwise each segment is a request."""
+        caps = self.capabilities
+        for i, segment in enumerate(segments):
+            duration = segment.frame_count / fps
+            if caps.max_duration is not None and duration > caps.max_duration + 1e-6:
+                return (f"Segment {i + 1} (frames {segment.start_frame}-{segment.end_frame}) spans {duration:.2f} s: "
+                        f"{self.label} generates at most {caps.max_duration:g} s per segment.")
+        if caps.prompt_segments:
+            start, end = segments[0].start_frame, segments[-1].end_frame
+            count = sum(1 for frame in key_frames if start <= frame <= end)
+            if count < caps.min_key_poses:
+                return (f"{self.label} needs at least {caps.min_key_poses} key poses on the track "
+                        f"({count} in frames {start}-{end}).")
+            return ""
+        for i, segment in enumerate(segments):
+            count = sum(1 for frame in key_frames if segment.start_frame <= frame <= segment.end_frame)
+            if count < caps.min_key_poses:
+                return (f"{self.label} needs at least {caps.min_key_poses} key poses in each segment ({count} in "
+                        f"segment {i + 1}, frames {segment.start_frame}-{segment.end_frame}).")
+        return ""
+
     def check_request(self, request):
         """Raises ValueError if the backend can't generate this request."""
-        problem = self.range_problem(request.start_frame, request.end_frame, request.fps, len(request.key_poses))
+        if request.segments:
+            if not self.capabilities.prompt_segments:
+                raise ValueError(f"{self.label} doesn't generate prompt segments in one request.")
+            problem = self.segments_problem(request.segments, request.fps, list(request.key_poses))
+        else:
+            problem = self.range_problem(request.start_frame, request.end_frame, request.fps,
+                                         len(request.key_poses))
         if problem:
             raise ValueError(problem)
 
