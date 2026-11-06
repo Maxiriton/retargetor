@@ -127,6 +127,22 @@ def model_timing(start, end, key_frames, fps, model_fps):
     return Timing(key_indices, count, anchors, [indices[f] for f in anchors])
 
 
+def segment_frame_counts(segments, timing, transition_frames):
+    """Number of model frames of each prompt segment (core.segments, covering the timing's range): its boundaries
+    go to model frames the way the key poses' timing maps Blender frames (stretched between key poses), rounded.
+    Raises ValueError if a segment gets no more model frames than the transition between segments."""
+    starts = [segment.start_frame for segment in segments[1:]]
+    indices = np.rint(np.interp(np.asarray(starts, dtype=np.float64), np.asarray(timing.anchors, dtype=np.float64),
+                                np.asarray(timing.anchor_indices, dtype=np.float64))).astype(int).tolist()
+    bounds = [0] + indices + [timing.count]
+    counts = [b - a for a, b in zip(bounds, bounds[1:])]
+    for i, (segment, count) in enumerate(zip(segments, counts)):
+        if count <= transition_frames:
+            raise ValueError(f"Segment {i + 1} (frames {segment.start_frame}-{segment.end_frame}) is too short for the "
+                             f"model: {count} frames, more than {transition_frames} needed.")
+    return counts
+
+
 def resample(rotations, positions, times):
     """Rotations (T, J, 4) and positions (T, 3) at fractional frame times (slerp, lerp)"""
     last = len(rotations) - 1

@@ -59,6 +59,42 @@ class KimodoHandler:
         if abs(float(self.model.fps) - joints.MODEL_FPS) > 1e-6:
             raise RuntimeError(f"The model runs at {self.model.fps} fps, the backend expects {joints.MODEL_FPS}.")
 
+    def _generate_segments(self, request, timing, constraint_list, context):
+        """The request's prompt segments in one pass, with Kimodo's multi-prompt generation: one segment after the
+        other, each one starting from the end of the previous one (its first TRANSITION_FRAMES constrained by it),
+        the key poses cropped to each segment."""
+        counts = convert.segment_frame_counts(request.segments, timing, joints.TRANSITION_FRAMES)
+        seeds = [int(s.seed) if s.seed is not None else None for s in request.segments]
+        count = len(counts)
+        # Kimodo's multi-prompt doesn't pass a progress bar to each segment's denoising loop: the instance's _generate
+        # gets one, telling which segment runs (and checking for a cancel at each step)
+        original = self.model._generate
+        calls = [0]
+
+        def generate(*args, **kwargs):
+            index = calls[0]
+            calls[0] += 1
+
+            def progress_bar(steps):
+                steps = list(steps)
+                for i, step in enumerate(steps):
+                    fraction = (index + i / len(steps)) / count
+                    context.progress(0.05 + 0.85 * fraction, f"Segment {index + 1}/{count}: denoising")
+                    yield step
+                context.progress(0.05 + 0.85 * (index + 1) / count, f"Segment {index + 1}/{count}: post-processing")
+
+            kwargs["progress_bar"] = progress_bar
+            return original(*args, **kwargs)
+
+        self.model._generate = generate
+        try:
+            return self.model([sentence(s.prompt) for s in request.segments], counts, multi_prompt=True,
+                              seeds=seeds, constraint_lst=constraint_list, num_denoising_steps=DIFFUSION_STEPS,
+                              num_samples=1, post_processing=True, return_numpy=True,
+                              num_transition_frames=joints.TRANSITION_FRAMES)
+        finally:
+            del self.model._generate
+
     def generate(self, request, context):
         layout = self._soma()
         if self.model is None:
@@ -69,8 +105,9 @@ class KimodoHandler:
         constraints, canonical, timing = convert.request_to_constraints(request, layout, joints.MODEL_FPS,
                                                                         joints.END_EFFECTORS)
         num_frames = timing.count
-        if request.seed is not None:
-            seed_everything(int(request.seed))
+        seed = request.segments[0].seed if request.segments else request.seed
+        if seed is not None:
+            seed_everything(int(seed))
         constraint_list = load_constraints_lst(constraints, self.model.skeleton) if constraints else []
 
         def progress_bar(steps):
@@ -82,12 +119,13 @@ class KimodoHandler:
             # Kimodo asks for the next step once the denoising is over: its post-processing comes next
             context.progress(0.9, "Post-processing")
 
-        prompt = request.prompt.strip()
-        if prompt and not prompt.endswith("."):
-            prompt += "."  # as kimodo_gen does
         context.progress(0.02, "Encoding the prompt")
-        output = self.model(prompt, num_frames, constraint_lst=constraint_list, num_denoising_steps=DIFFUSION_STEPS,
-                            num_samples=1, post_processing=True, return_numpy=True, progress_bar=progress_bar)
+        if request.segments:
+            output = self._generate_segments(request, timing, constraint_list, context)
+        else:
+            output = self.model(sentence(request.prompt), num_frames, constraint_lst=constraint_list,
+                                num_denoising_steps=DIFFUSION_STEPS, num_samples=1, post_processing=True,
+                                return_numpy=True, progress_bar=progress_bar)
         context.check_cancelled()
 
         root_index = layout.index(layout.root)
@@ -95,6 +133,13 @@ class KimodoHandler:
             output["global_rot_mats"][0], output["posed_joints"][0][:, root_index], canonical, request, timing)
         context.send_frames(request.start_frame, request.fps, rotations, positions)
         print(f"Generated {num_frames} model frames, heading {canonical.heading:.3f} rad", file=sys.stderr)
+
+
+def sentence(prompt):
+    prompt = prompt.strip()
+    if prompt and not prompt.endswith("."):
+        prompt += "."  # as kimodo_gen does
+    return prompt
 
 
 def main():

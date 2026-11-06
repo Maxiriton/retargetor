@@ -12,7 +12,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix
 
-from . import generated_keys
+from . import generated_keys, segment_track
 from .backends import process, protocol, registry
 from .core import profile as core_profile
 from .core.motion import GenerationRequest
@@ -367,10 +367,12 @@ def place_model(model, rig, view_layer):
 ### Request and result
 
 def build_request(context, rig, model, backend, rig_profile, start, end, key_frames, prompt="", seed=None,
-                  keyed=None):
+                  keyed=None, segments=None):
     """Snap the model to the rig on each key frame, and on the start frame (the request's origin), and read
     its poses. keyed: {frame: ids of the roles keyed there}, for a backend taking partial poses (None: every
-    key pose is whole). Returns (GenerationRequest, translation scale rig -> model, retargeting errors)."""
+    key pose is whole). segments: prompt segments (core) covering start to end, for a backend generating them in
+    one pass (prompt and seed unused). Returns (GenerationRequest, translation scale rig -> model, retargeting
+    errors)."""
     scene, view_layer = context.scene, context.view_layer
     skeleton = armature_skeleton(model)
     pairs = core_profile.compose(rig_profile, backend.joint_map, core_profile.TO_MODEL)
@@ -402,7 +404,7 @@ def build_request(context, rig, model, backend, rig_profile, start, end, key_fra
     request = GenerationRequest(start, end, scene.render.fps / scene.render.fps_base,
                                 {frame: poses[frame] for frame in key_frames},
                                 prompt=prompt if caps.prompt else "", seed=seed if caps.seed else None,
-                                origin=poses[start])
+                                origin=poses[start], segments=list(segments or []))
     backend.check_request(request)
     return request, scale[0], retargeter.errors
 
@@ -581,6 +583,30 @@ class GenerationError(Exception):
     pass
 
 
+class Chunk:
+    """One request of a generation and the frames its result is written on.
+    write_start / write_end: frames written. request_start: the request's first frame (its origin): the frame
+    before write_start for a segment generated after another one, so it starts where that one ended.
+    segments: prompt segments generated in one pass by the backend ([] for one prompt)."""
+
+    def __init__(self, write_start, write_end, request_start, prompt="", seed=None, segments=None):
+        self.write_start, self.write_end, self.request_start = write_start, write_end, request_start
+        self.prompt, self.seed = prompt, seed
+        self.segments = list(segments or [])
+
+
+def generation_chunks(state, backend, start, end):
+    """The Chunks of a character's generation (RTGTR_CharacterState): one for a prompt, or for prompt segments with
+    a backend generating them in one pass; otherwise one per segment, one after the other, without transition"""
+    track = segment_track.read_track(state)
+    if not track:
+        return [Chunk(start, end, start, state.prompt, state.seed)]
+    if backend.capabilities.prompt_segments:
+        return [Chunk(start, end, start, segments=track)]
+    return [Chunk(s.start_frame, s.end_frame, s.start_frame - 1 if i > 0 else s.start_frame, s.prompt, s.seed)
+            for i, s in enumerate(track)]
+
+
 class GenerationTask:
     """One generation for one character. start(), then update() until it returns True.
     Raises ValueError / KeyError / GenerationError with an explicit message."""
@@ -597,6 +623,10 @@ class GenerationTask:
         self.translation_scale = 1.0
         self.errors = set()
         self.result = None  # (frames written, keys removed) once finished
+        self.chunks = []  # the requests (Chunk), generated and written one after the other
+        self.chunk_index = 0
+        self.segment_count = 0  # prompt segments of the character (0: one prompt)
+        self._written = [0, 0]  # frames written and keys removed by the chunks already finished
         self.notes = []  # what was done to the rig besides the generated keys (FK snap...)
         self.writer = None
         self.ik_writer = None
@@ -619,13 +649,21 @@ class GenerationTask:
             done, total = self.writer.done, len(self.writer.frames)
             if self.ik_writer is not None:
                 done, total = done + self.ik_writer.done, total + len(self.ik_writer.frames)
-            return GENERATION_SHARE + (1.0 - GENERATION_SHARE) * (done / total if total else 1.0)
-        if self.stage == GENERATING and self.job is not None:
-            return GENERATION_SHARE * self.job.fraction
-        return 0.0
+            local = GENERATION_SHARE + (1.0 - GENERATION_SHARE) * (done / total if total else 1.0)
+        elif self.stage == GENERATING and self.job is not None:
+            local = GENERATION_SHARE * self.job.fraction
+        else:
+            local = 0.0
+        return (self.chunk_index + local) / max(1, len(self.chunks))
 
     @property
     def message(self):
+        if len(self.chunks) > 1 and self.stage in (GENERATING, WRITING):
+            return f"Segment {self.chunk_index + 1}/{len(self.chunks)}: {self._stage_message}"
+        return self._stage_message
+
+    @property
+    def _stage_message(self):
         if self.stage == SKELETON:
             return f"Starting {self.backend.label}"
         if self.stage == WRITING:
@@ -658,10 +696,17 @@ class GenerationTask:
             self.notes.append(f"{retyped} edited Generated keys became Keyframes")
         self.start_frame, self.end_frame, self.key_frames = generation_range(rig, self.rig_profile)
         scene = context.scene
-        problem = self.backend.range_problem(self.start_frame, self.end_frame,
-                                             scene.render.fps / scene.render.fps_base, len(self.key_frames))
+        fps = scene.render.fps / scene.render.fps_base
+        state = rig.retargetor
+        self.segment_count = len(state.segments)
+        if self.segment_count:
+            problem = self.backend.segments_problem(segment_track.read_track(state), fps, self.key_frames)
+        else:
+            problem = self.backend.range_problem(self.start_frame, self.end_frame, fps, len(self.key_frames))
         if problem:
             raise ValueError(problem)
+        self.chunks = generation_chunks(state, self.backend, self.start_frame, self.end_frame)
+        self.chunk_index = 0
         snaps, in_ik = limbs_in_ik(rig, self.rig_profile, self.start_frame, self.end_frame, self.key_frames)
         self.partial = self.backend.capabilities.partial_poses
         if self.partial:
@@ -716,14 +761,15 @@ class GenerationTask:
                          "bones to the humanoid roles in the Rig Profile panel.")
 
     def _send_request(self, context, rig, model):
-        state = rig.retargetor
+        chunk = self.chunks[self.chunk_index]
         start = time.perf_counter()
-        keyed = keyed_roles(rig, self.rig_profile, self.key_frames) if self.partial else None
+        key_frames = [f for f in self.key_frames if chunk.request_start <= f <= chunk.write_end]
+        keyed = keyed_roles(rig, self.rig_profile, key_frames) if self.partial else None
         request, self.translation_scale, errors = build_request(
-            context, rig, model, self.backend, self.rig_profile, self.start_frame, self.end_frame, self.key_frames,
-            state.prompt, state.seed, keyed)
+            context, rig, model, self.backend, self.rig_profile, chunk.request_start, chunk.write_end, key_frames,
+            chunk.prompt, chunk.seed, keyed, chunk.segments)
         self.request = request
-        self.timings["key poses"] = time.perf_counter() - start
+        self.timings["key poses"] = self.timings.get("key poses", 0.0) + time.perf_counter() - start
         self.errors |= errors
         self.stage = GENERATING
         self.job = self.worker.submit("generate", request=request.to_dict())
@@ -758,7 +804,7 @@ class GenerationTask:
             return False
 
         if self.stage == GENERATING:
-            self.timings["generation"] = self.job.duration
+            self.timings["generation"] = self.timings.get("generation", 0.0) + self.job.duration
             model = rig.retargetor.model_armature
             skeleton = armature_skeleton(model)
             if model is None or skeleton is None:
@@ -766,10 +812,12 @@ class GenerationTask:
             self._write_started = time.perf_counter()
             motion = protocol.motion_from_frames(self.job.frames, skeleton.names)
             self.worker.forget(self.job)
+            chunk = self.chunks[self.chunk_index]
             self.writer = MotionWriter(context, rig, model, self.backend, self.rig_profile, motion,
-                                       self.start_frame, self.end_frame, self.translation_scale)
+                                       chunk.write_start, chunk.write_end, self.translation_scale)
+            self.ik_writer = None
             if self.synced:
-                self.ik_writer = IkSnapWriter(rig, self.synced, self.start_frame, self.end_frame)
+                self.ik_writer = IkSnapWriter(rig, self.synced, chunk.write_start, chunk.write_end)
             self.stage = WRITING
             return False
         return True
@@ -779,14 +827,23 @@ class GenerationTask:
         if not self.writer.finished or self.ik_writer is None:
             if not self.writer.step(context, budget):
                 return False
-            self.timings["writing"] = time.perf_counter() - self._write_started
+            self.timings["writing"] = self.timings.get("writing", 0.0) + time.perf_counter() - self._write_started
             if self.ik_writer is not None:
                 self._write_started = time.perf_counter()
                 return False
         if self.ik_writer is not None:
             if not self.ik_writer.step(context, budget):
                 return False
-            self.timings["IK snap"] = time.perf_counter() - self._write_started
+            self.timings["IK snap"] = self.timings.get("IK snap", 0.0) + time.perf_counter() - self._write_started
+        self.errors |= self.writer.errors
+        self._written[0] += len(self.writer.frames)
+        self._written[1] += self.writer.removed
+        if self.chunk_index < len(self.chunks) - 1:
+            # The next segment starts from this one's last frame, now written
+            self.chunk_index += 1
+            self._send_request(context, rig, rig.retargetor.model_armature)
+            return False
+        if self.ik_writer is not None:
             restore_switches(rig, [saved for saved in self.switches if saved[0].ik_snap], context.view_layer)
             self.notes.append(f"{', '.join(limb.name for limb in self.synced)}: IK controls snapped to the generated "
                               "motion, back in IK")
@@ -794,8 +851,9 @@ class GenerationTask:
         if self.keys_before is not None:
             # fix_quaternion_signs may have flipped keys the add-on made (same rotations): still the add-on's
             generated_keys.record_added(rig, self.keys_before)
-        self.errors |= self.writer.errors
-        self.result = (len(self.writer.frames), self.writer.removed)
+        if self.segment_count:
+            segment_track.mark_generated(rig.retargetor)
+        self.result = tuple(self._written)
         self.stage = FINISHED
         return True
 

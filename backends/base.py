@@ -79,7 +79,8 @@ class Backend:
     def segments_problem(self, segments, fps, key_frames):
         """Why the backend can't generate this track of prompt segments (core.segments, contiguous) with key poses
         on key_frames, or "" if it can. With prompt_segments one request covers the track: the maximum duration
-        applies to each segment, the fewest key poses to the whole track. Otherwise each segment is a request."""
+        applies to each segment, the fewest key poses to the whole track. Otherwise each segment is a request, from
+        the previous segment's last frame."""
         caps = self.capabilities
         for i, segment in enumerate(segments):
             duration = segment.frame_count / fps
@@ -94,7 +95,9 @@ class Backend:
                         f"({count} in frames {start}-{end}).")
             return ""
         for i, segment in enumerate(segments):
-            count = sum(1 for frame in key_frames if segment.start_frame <= frame <= segment.end_frame)
+            # A segment after another one is generated from that one's last frame
+            first = segment.start_frame - 1 if i > 0 else segment.start_frame
+            count = sum(1 for frame in key_frames if first <= frame <= segment.end_frame)
             if count < caps.min_key_poses:
                 return (f"{self.label} needs at least {caps.min_key_poses} key poses in each segment ({count} in "
                         f"segment {i + 1}, frames {segment.start_frame}-{segment.end_frame}).")
