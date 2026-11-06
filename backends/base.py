@@ -24,11 +24,14 @@ class Capabilities:
     prompt_segments: generates a track of prompt segments (GenerationRequest.segments) in one pass, with its own
     transitions between them; max_duration then applies to each segment. Otherwise the add-on generates the
     segments one after the other, each one a request of its own, without transition.
+    transition_duration: with prompt_segments, seconds before each boundary where the backend blends the previous
+    segment into the next one (shown in the timeline).
     """
     prompt: bool = False
     min_key_poses: int = 2
     partial_poses: bool = False
     prompt_segments: bool = False
+    transition_duration: float = 0.0
     seed: bool = False
     max_duration: float | None = None
     native_fps: float | None = None

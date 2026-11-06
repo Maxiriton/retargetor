@@ -100,7 +100,26 @@ def main():
     bpy.ops.retargetor.segment_remove()
     checks.check(len(state.segments) == 0, "every segment removed")
     checks.check(generation.generation_range(rig, _profile(rig))[:2] == (10, 109), "back to the custom range")
+    check_layout(checks)
     checks.finish()
+
+
+def check_layout(checks):
+    """Where the bands are, and what is under a point"""
+    from retargetor import segment_draw as sd
+    characters = [("rig", True, [(1, 40), (41, 80)]), ("other", False, [(1, 120)])]
+    bands = sd.band_layout(characters, lambda frame: 10.0 * frame, 2.0, tag_x0=0.0, tag_width=lambda name: 30.0)
+    checks.check([(b.y0, b.y1) for b in bands] == [(44.0, 112.0), (120.0, 188.0)], "bands stacked, UI scale 2")
+    checks.check([(bar.x0, bar.x1) for bar in bands[0].bars] == [(5.0, 405.0), (405.0, 805.0)],
+                 "segments from half a frame before to half a frame after")
+    y = 60.0
+    checks.check(sd.hit_test(bands, 200.0, y, 2.0) == ("rig", 0, 'BODY'), "body of the first segment")
+    checks.check(sd.hit_test(bands, 412.0, y, 2.0) == ("rig", 1, 'START'), "boundary: start of the next segment")
+    checks.check(sd.hit_test(bands, 800.0, y, 2.0) == ("rig", 1, 'END'), "track's end")
+    checks.check(sd.hit_test(bands, 20.0, y, 2.0) == ("rig", None, 'TAG'), "name tag")
+    checks.check(sd.hit_test(bands, 900.0, y, 2.0) is None, "after the track")
+    checks.check(sd.hit_test(bands, 900.0, 150.0, 2.0) == ("other", 0, 'BODY'), "second band")
+    checks.check(sd.hit_test(bands, 200.0, 20.0, 2.0) is None, "below the bands")
 
 
 def _profile(rig):

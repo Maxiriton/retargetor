@@ -38,6 +38,7 @@ from . import profile_operators
 from . import generate_operators
 from . import generated_keys
 from . import segment_operators
+from . import segment_draw
 from .properties import get_character
 
 # Name of the last active bone seen by the selection handler (UI state, not saved)
@@ -96,6 +97,7 @@ addon_modules = (
     generate_operators,
     generated_keys,
     segment_operators,
+    segment_draw,
 )
 
 def register():
