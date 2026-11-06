@@ -95,6 +95,12 @@ def main():
 
     errors = draw_panels([ui.RETARGETOR_PT_GeneratePanel])
     checks.check(not errors, f"Generate panel with segments draws: {errors}")
+    from test_panel import CheckingLayout
+    errors = []
+    fake = type("Header", (), {"layout": CheckingLayout(errors)})()
+    ui.draw_editor_header(fake, bpy.context)
+    ui.RTGTR_MT_EditorMenu.draw(fake, bpy.context)
+    checks.check(not errors, f"the animation editors' header and Retargetor menu draw: {errors}")
 
     bpy.ops.retargetor.segment_remove()
     bpy.ops.retargetor.segment_remove()

@@ -1,6 +1,6 @@
 # type: ignore
 import bpy
-from bpy.types import Panel, UIList
+from bpy.types import Menu, Panel, UIList
 
 from . import generation
 from .backends import process, registry
@@ -202,6 +202,33 @@ class RETARGETOR_PT_RigProfilePanel(Panel):
             layout.operator("retargetor.snap_fk_to_ik", icon='SNAP_ON')
 
 
+def worker_status(backend):
+    """The backend's model, for the panel and the animation editors' headers: (label, icon, start button text or
+    "", stop button shown, error message or "")"""
+    worker = registry.existing_worker(backend.id)
+    if worker is None or worker.state == process.STOPPED:
+        return "Stopped", 'RADIOBUT_OFF', "Start", False, worker.error if worker is not None else ""
+    if worker.state == process.STARTING or (worker.busy and not worker.loaded):
+        label, icon = "Starting", 'SORTTIME'
+    elif worker.busy:
+        label, icon = "Busy", 'SORTTIME'
+    elif worker.loaded:
+        label, icon = "Model loaded", 'CHECKMARK'
+    else:
+        label, icon = "Running", 'RADIOBUT_ON'
+    start = "Load" if not worker.loaded and not worker.busy else ""
+    return label, icon, start, True, worker.error or ""
+
+
+def draw_progress(layout, task, width=None):
+    """The running generation's progress bar and its cancel button"""
+    row = layout.row(align=True)
+    if width is not None:
+        row.ui_units_x = width
+    row.progress(factor=task.fraction, type='BAR', text=f"{task.message} {task.fraction * 100:.0f}%")
+    row.operator("retargetor.cancel_generation", text="", icon='CANCEL')
+
+
 class RETARGETOR_PT_GeneratePanel(Panel):
     """Generate the in-betweens of the character with the active backend"""
     bl_label = "Generate"
@@ -219,26 +246,16 @@ class RETARGETOR_PT_GeneratePanel(Panel):
         props = row.operator("preferences.addon_show", text="", icon='PREFERENCES')
         props.module = ADDON_ID
 
-        worker = registry.existing_worker(backend.id)
+        label, icon, start, stop, error = worker_status(backend)
         row = layout.row(align=True)
-        if worker is None or worker.state == process.STOPPED:
-            row.label(text="Stopped", icon='RADIOBUT_OFF')
-            row.operator("retargetor.backend_start", text="Start", icon='PLAY')
-        else:
-            if worker.state == process.STARTING or (worker.busy and not worker.loaded):
-                row.label(text="Starting", icon='SORTTIME')
-            elif worker.busy:
-                row.label(text="Busy", icon='SORTTIME')
-            elif worker.loaded:
-                row.label(text="Model loaded", icon='CHECKMARK')
-            else:
-                row.label(text="Running", icon='RADIOBUT_ON')
-            if not worker.loaded and not worker.busy:
-                row.operator("retargetor.backend_start", text="Load", icon='PLAY')
+        row.label(text=label, icon=icon)
+        if start:
+            row.operator("retargetor.backend_start", text=start, icon='PLAY')
+        if stop:
             row.operator("retargetor.backend_stop", text="Stop", icon='PAUSE')
-        if worker is not None and worker.error:
+        if error:
             box = layout.box()
-            for line in worker.error.splitlines()[:6]:
+            for line in error.splitlines()[:6]:
                 box.label(text=line, icon='ERROR')
 
         rig, state = get_character(context)
@@ -265,9 +282,7 @@ class RETARGETOR_PT_GeneratePanel(Panel):
 
         task = generation.current_task
         if task is not None:
-            row = layout.row(align=True)
-            row.progress(factor=task.fraction, type='BAR', text=f"{task.message} {task.fraction * 100:.0f}%")
-            row.operator("retargetor.cancel_generation", text="", icon='CANCEL')
+            draw_progress(layout, task)
         else:
             row = layout.row()
             row.enabled = not problem
@@ -382,6 +397,74 @@ def draw_segments(context, layout, rig, state, backend):
     return problem
 
 
+### The animation editors' headers: everything from the timeline
+
+class RTGTR_MT_EditorMenu(Menu):
+    """Retargetor in the animation editors: generate, the prompt segments, the model"""
+    bl_idname = "RTGTR_MT_editor_menu"
+    bl_label = "Retargetor"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator_context = 'INVOKE_DEFAULT'
+        backend = active_backend(context)
+        rig, state = get_character(context)
+        if rig is None:
+            layout.label(text="Choose the character in the Retarget panel", icon='INFO')
+        else:
+            layout.label(text=f"Character: {rig.name}", icon='ARMATURE_DATA')
+        layout.operator("retargetor.generate_inbetweens", icon='ANIM')
+        layout.separator()
+        if rig is not None and len(state.segments) > 0:
+            props = layout.operator("retargetor.segment_edit", text="Edit Active Segment...", icon='GREASEPENCIL')
+            props.character, props.index = rig.name, state.segments_active_index
+        layout.operator("retargetor.segment_add", icon='ADD')
+        layout.operator("retargetor.segment_split", icon='MOD_EDGESPLIT')
+        layout.operator("retargetor.segment_remove", icon='REMOVE')
+        layout.prop(context.scene, "retargetor_show_segments")
+        layout.separator()
+        layout.operator("retargetor.clear_generated_keys", icon='TRASH')
+        layout.separator()
+        label, icon, start, stop, error = worker_status(backend)
+        layout.label(text=f"{backend.label}: {label}", icon=icon)
+        if start:
+            layout.operator("retargetor.backend_start", text=f"{start} {backend.label}", icon='PLAY')
+        if stop:
+            layout.operator("retargetor.backend_stop", text=f"Stop {backend.label}", icon='PAUSE')
+        for line in error.splitlines()[:6]:
+            layout.label(text=line, icon='ERROR')
+        props = layout.operator("preferences.addon_show", text="Preferences...", icon='PREFERENCES')
+        props.module = ADDON_ID
+
+
+def draw_editor_header(self, context):
+    """Appended to the Dope Sheet (Timeline included) and Graph Editor headers: the model's state, the
+    generation's progress or the Generate button, the bands' visibility and the Retargetor menu"""
+    layout = self.layout
+    scene = context.scene
+    if not hasattr(scene, "retargetor_show_segments"):
+        return
+    backend = active_backend(context)
+    layout.separator()
+    row = layout.row(align=True)
+    show = scene.retargetor_show_segments
+    row.prop(scene, "retargetor_show_segments", text="", icon='HIDE_OFF' if show else 'HIDE_ON')
+    row.menu(RTGTR_MT_EditorMenu.bl_idname, text="", icon='OUTLINER_OB_ARMATURE')
+    task = generation.current_task
+    if task is not None:
+        draw_progress(layout, task, width=12)
+        return
+    label, icon, start, _stop, error = worker_status(backend)
+    row = layout.row(align=True)
+    row.label(text=backend.label, icon='ERROR' if error else icon)
+    if start:
+        row.operator("retargetor.backend_start", text="", icon='PLAY')
+    layout.operator("retargetor.generate_inbetweens", text="Generate", icon='ANIM')
+
+
+_HEADERS = ("DOPESHEET_HT_header", "GRAPH_HT_header")
+
+
 class RTGTR_UL_Roles(UIList):
     """Humanoid roles of a rig profile: the bone read and the control written for each"""
     def draw_item(self, context, layout, data, item, icon, active_data, active_property, index):
@@ -413,12 +496,18 @@ classes = (
     RETARGETOR_PT_RetargetPanel,
     RETARGETOR_PT_RigProfilePanel,
     RETARGETOR_PT_GeneratePanel,
+    RTGTR_MT_EditorMenu,
 )
 
 def register():
     for cl in classes:
         bpy.utils.register_class(cl)
+    for name in _HEADERS:
+        getattr(bpy.types, name).append(draw_editor_header)
+
 
 def unregister():
+    for name in _HEADERS:
+        getattr(bpy.types, name).remove(draw_editor_header)
     for cl in reversed(classes):
         bpy.utils.unregister_class(cl)

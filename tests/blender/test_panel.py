@@ -44,6 +44,11 @@ class CheckingLayout:
     def progress(self, **_kwargs):
         pass
 
+    def menu(self, menu, **kwargs):
+        self._check_icon(kwargs)
+        if not hasattr(bpy.types, menu):
+            self.errors.append(f"unknown menu {menu}")
+
     def separator(self, **_kwargs):
         pass
 
