@@ -57,6 +57,7 @@ A backend is a folder in `backends/` with a `Backend` subclass (`backend.py`) an
 ## Testing
 
 - All tests: `python tests/run_tests.py --spikes <folder with phase0/out and phase1/out> [--kimodo-python <venv python.exe>]` (the chain tests need the spike outputs, which are not committed; the Kimodo tests need the venv and a CUDA GPU, and take a few minutes).
+- `--gui` also runs the tests needing Blender's interface (`test_segment_mouse.py`: the segment bands with simulated mouse events). A window opens on the user's screen for about a minute: say so first. Never start a Blender with its interface without `BLENDER_USER_RESOURCES` pointed at a scratch folder (`run_tests.py` does it): a preference save in that session (the "scripts disabled" popup with "Permanently allow" does one) would overwrite the user's real preferences. The first simulated events after start don't reach the editor: the test warms up with a cancelled drag.
 - Unit tests run with Blender's own Python (numpy included), found next to `blender.exe`.
 - Headless: `"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b --factory-startup <file.blend> --python <script.py>`. The `blender` on PATH is 5.0, which is too old for this extension.
 - `fcurve.update()` may move the keys in memory: look keyframe points up again after it (a kept reference reads and writes garbage).
