@@ -21,7 +21,7 @@ Retargetor is a Blender extension (Blender 5.2+) that retargets animation betwee
 | `setup_operators.py` | Bone list setup, translation scale, JSON import/export, corrections |
 | `retarget_operators.py` | Snapping and baking operators |
 | `profile_operators.py` | Rig profile: presets, roles, JSON, Snap FK to IK |
-| `ui.py` | Sidebar panels and lists (Retarget, Rig Profile, Generate) |
+| `ui.py` | Sidebar panels and lists (Retarget, Rig Profile, Generate); the animation editors' header (model state, Generate or progress, bands toggle, Retargetor menu) |
 | `preferences.py` | Add-on preferences: active backend, developer option, each backend's settings (declared by the backend) |
 | `generation.py` | Generate In-betweens step by step (`GenerationTask`): key poses, model armature, request, result baked as `GENERATED` keys (`MotionWriter`), IK controls snapped back (`IkSnapWriter`) |
 | `generated_keys.py` | Edited `GENERATED` keys become Keyframes as soon as they are edited: values recorded after each generation, compared by a depsgraph handler. Also records the user keys the add-on makes itself (FK snap...), and `clear()` removes both |
