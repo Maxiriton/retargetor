@@ -25,33 +25,49 @@ class Role:
     default_offset_mode: str
     # Bones that carry the root motion
     default_use_translation: bool = False
+    # A rig must map it for the motion to make sense: the rig check refuses to generate without it. The spine
+    # roles are optional one by one, but at least one of them is needed (SPINE_BODY).
+    required: bool = False
 
 
-def _side_roles(base_id, label, group):
-    return [Role(f"{base_id}.{side}", f"{label} ({side})", group, "ROLL") for side in ("L", "R")]
+def _side_roles(base_id, label, group, required=False):
+    return [Role(f"{base_id}.{side}", f"{label} ({side})", group, "ROLL", required=required) for side in ("L", "R")]
 
 
 ROLES = (
     [
-        Role("hips", "Hips", SPINE, "REST_OFFSET", default_use_translation=True),
+        Role("hips", "Hips", SPINE, "REST_OFFSET", default_use_translation=True, required=True),
         Role("spine", "Spine", SPINE, "REST_OFFSET"),
         Role("chest", "Chest", SPINE, "REST_OFFSET"),
         Role("upper_chest", "Upper Chest", SPINE, "REST_OFFSET"),
         Role("neck", "Neck", SPINE, "REST_OFFSET"),
         Role("upper_neck", "Upper Neck", SPINE, "REST_OFFSET"),
-        Role("head", "Head", SPINE, "REST_OFFSET"),
+        Role("head", "Head", SPINE, "REST_OFFSET", required=True),
     ]
     + _side_roles("shoulder", "Shoulder", ARM)
-    + _side_roles("upper_arm", "Upper Arm", ARM)
-    + _side_roles("forearm", "Forearm", ARM)
-    + _side_roles("hand", "Hand", ARM)
-    + _side_roles("thigh", "Thigh", LEG)
-    + _side_roles("shin", "Shin", LEG)
-    + _side_roles("foot", "Foot", LEG)
+    + _side_roles("upper_arm", "Upper Arm", ARM, required=True)
+    + _side_roles("forearm", "Forearm", ARM, required=True)
+    + _side_roles("hand", "Hand", ARM, required=True)
+    + _side_roles("thigh", "Thigh", LEG, required=True)
+    + _side_roles("shin", "Shin", LEG, required=True)
+    + _side_roles("foot", "Foot", LEG, required=True)
     + _side_roles("toes", "Toes", LEG)
 )
 
 ROLES_BY_ID = {role.id: role for role in ROLES}
+
+# Between the hips and the neck: a rig maps at least one of them
+SPINE_BODY = ("spine", "chest", "upper_chest")
+
+
+def missing_required(role_ids):
+    """The required roles missing from `role_ids` (role ids), in the order of ROLES. The spine counts as one
+    entry, "spine", when none of SPINE_BODY is there."""
+    present = set(role_ids)
+    missing = [role.id for role in ROLES if role.required and role.id not in present]
+    if not present.intersection(SPINE_BODY):
+        missing.insert(1 if "hips" in missing else 0, "spine")
+    return missing
 
 
 def get_role(role_id):
