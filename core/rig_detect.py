@@ -37,6 +37,32 @@ class BoneInfo:
     tail: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
+def body_axes(up, left):
+    """The rig's body frame at rest, rounded to its armature's axes: (left, back, up) as unit axis vectors in the
+    armature's space. Blender's convention is left = +X, back = +Y (the character faces -Y), up = +Z; an FBX import
+    has its bones Y-up, an SMPL skeleton faces +Y. up: from the hips to the head; left: from the right limbs to the
+    left ones. Raises ValueError if they are parallel."""
+    def nearest(vector, exclude=None):
+        best = None
+        for axis in range(3):
+            if exclude is not None and axis == exclude:
+                continue
+            if best is None or abs(vector[axis]) > abs(vector[best]):
+                best = axis
+        unit = [0.0, 0.0, 0.0]
+        unit[best] = 1.0 if vector[best] >= 0.0 else -1.0
+        return best, tuple(unit)
+
+    up_axis, up_unit = nearest(up)
+    _left_axis, left_unit = nearest(left, exclude=up_axis)
+    if not any(left) or not any(up):
+        raise ValueError("The rig's up and left directions can't be measured.")
+    back = (up_unit[1] * left_unit[2] - up_unit[2] * left_unit[1],
+            up_unit[2] * left_unit[0] - up_unit[0] * left_unit[2],
+            up_unit[0] * left_unit[1] - up_unit[1] * left_unit[0])
+    return left_unit, back, up_unit
+
+
 # How a role was found (RoleMatch.how)
 BY_NAME = "NAME"
 BY_HIERARCHY = "HIERARCHY"
@@ -346,13 +372,42 @@ def detect(bones):
         result.matches[role.id] = RoleMatch(role.id, bone, how)
 
     result.missing = missing_required(result.matches)
-    # Blender's convention: the character faces -Y, its left side is +X
-    for role in ("upper_arm", "thigh"):
-        left, right = result.matches.get(f"{role}.L"), result.matches.get(f"{role}.R")
-        if left is not None and right is not None:
-            if tree.bones[left.bone].head[0] < tree.bones[right.bone].head[0]:
-                result.notes.append(f"'{left.bone}' (left) is on the -X side of '{right.bone}' (right): the "
-                                    "character faces +Y instead of -Y, or its sides are swapped")
-                break
+    heads = {role: tree.bones[match.bone].head for role, match in result.matches.items()}
+    tails = {role: tree.bones[match.bone].tail for role, match in result.matches.items()}
+    if sides_swapped(heads, tails):
+        result.notes.append("The bones named left are on the character's right (its feet point the other way): "
+                            "its sides may be swapped")
     return result
+
+
+def _sub(a, b):
+    return tuple(x - y for x, y in zip(a, b))
+
+
+def _cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _dot(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+def sides_swapped(heads, tails):
+    """Whether the bones named left are on the character's right, from {role id: head} and {role id: tail} of
+    the rest pose (any space): the feet point forward, so left = up x forward. True as soon as the arms or the
+    legs disagree; False when it can't be told."""
+    if "hips" not in heads or "head" not in heads:
+        return False
+    up = _sub(heads["head"], heads["hips"])
+    forward = (0.0, 0.0, 0.0)
+    for side in ("L", "R"):
+        foot = f"foot.{side}"
+        if foot in heads:
+            end = heads.get(f"toes.{side}", tails.get(foot))
+            forward = tuple(f + d for f, d in zip(forward, _sub(end, heads[foot])))
+    if not any(forward):
+        return False
+    side = _cross(up, forward)
+    return any(_dot(side, _sub(heads[f"{role}.L"], heads[f"{role}.R"])) < 0.0
+               for role in ("upper_arm", "thigh") if f"{role}.L" in heads and f"{role}.R" in heads)
 

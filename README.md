@@ -23,7 +23,7 @@ It can also **generate in-betweens**: pose your own rig at a few key frames, and
 - **Smooth rotations**: quaternion signs are kept continuous from frame to frame, so bones never spin the long way round between two keyframes.
 - **Import / export** of the matching as JSON, to reuse a setup on other scenes.
 - **Several characters per scene**: each target armature keeps its own setup.
-- **Rig profile**: map a rig once to humanoid roles (hips, upper arm, shin...), with a bone to read and a control to write for each, and snap the FK controls of IK-posed limbs. A Rigify preset is included.
+- **Rig setup**: a rig is mapped once to humanoid roles (hips, upper arm, shin...), with a bone to read and a control to write for each. Rigify, Auto-Rig Pro and CloudRig rigs and skeletons (Mixamo, Unreal, SMPL...) set themselves up; others are set up by picking their bones, and **Check Rig** tests what the controls do.
 - **Generate In-betweens**: the motion between your key poses, from a motion model running in its own process (Blender never freezes, and never loads the model itself). Your keys are never overwritten; the result comes as **Generated** keys. See [ROADMAP.md](ROADMAP.md) for what comes next.
 - **Prompt segments**: a track of prompts per character, one after the other, shown as bands in the Dope Sheet, the Timeline and the Graph Editor, and edited with the mouse like NLA strips; the whole track is generated at once, with the model's own transitions between the segments, or one segment is regenerated alone, joining the motion around it.
 
@@ -115,15 +115,19 @@ Files exported by older versions can still be imported. Missing fields fall back
 
 Older versions stored the setup on the scene (one per scene). When such a file is opened, the setup is moved onto its target armature object automatically, and the scene's **Target** is set to it. The setup is left on the scene, and a message is printed in the console, when it can't be moved: no target armature, a linked target, or a target that already has a bone list. In that case, open the file with the old version, **Export to JSON**, then open it with this version and **Import from JSON** on the target.
 
-## Rig profile
+## Rig setup
 
-The **Rig Profile** panel (same tab) describes how the **active armature** maps to humanoid roles. It is stored on the armature data, so every object using that armature shares it, and it travels with a rig linked from a library.
+The **Rig Setup** panel (same tab) describes how the **active armature** maps to humanoid roles: its rig profile. It is stored on the armature data, so every object using that armature shares it, and it travels with a rig linked from a library. Most rigs set themselves up: choosing the character as the **Target** is enough.
 
-- **Load Preset** fills it from a preset (Rigify human, with its FK controls), **Add Roles** adds the missing roles with their defaults.
-- Per role: **Read** is the bone whose pose is read (on Rigify, the `ORG-` bone, the result of FK and IK), **Write** is the control that receives motion (on Rigify, the FK control; empty means the role isn't written), Use Translation, and the offset mode. Limbs default to **Roll**, the spine, neck and head to **Offset**.
-- **IK limbs**: for each limb, the FK controls and the bone each one follows, and the IK/FK switch property. **Snap FK to IK** rotates the FK controls onto the current pose on the frames you list (for example `1, 61, 120`, or empty for the current frame), keys them, and switches the limbs to FK. IK keys are kept.
-- **IK snap** (per limb, in order): how each IK control follows the generated motion, so the limb plays in IK after generating. **Follow** takes the transform of a bone (with the offset of their rest poses), **Pole** places a pole target in the plane of the limb, **Rest** resets the control. The Rigify preset fills it; a limb without it stays in FK after generating.
-- **Import Profile** / **Export Profile** save it as JSON, to reuse it on a similar rig.
+- **Rigs recognized**: **Rigify**, **Auto-Rig Pro** and **CloudRig** rigs get their preset (with their FK controls, IK/FK switches and IK snap). A **skeleton** animated directly, without controls (Mixamo, Unreal's mannequin, SMPL, VRM, Daz, Character Creator, a mocap or BVH import...), is recognized from its bone names and hierarchy: each role's bone is read and written. Both are applied as soon as the character is chosen (or when it generates), when every required role is found.
+- **Detect Bones** does it on request, and keeps what it found on an incomplete skeleton. The roles are listed by body part; each one shows whether it is found (check), missing and required (error) or optional and missing. Pick a role's bone in the viewport (Pose Mode) and click the **eyedropper** of the role; the select button selects the role's bones to see them, the cross takes the role out. Required roles: hips, at least one spine bone, head, upper arms, forearms, hands, thighs, shins and feet.
+- **Separate Controls**: on a controller rig, each role has a bone to **read** (on Rigify, the `ORG-` bone, the result of FK and IK) and a control to **write** (on Rigify, the FK control; empty means the role isn't written). Off, for a skeleton: one bone per role, read and written.
+- **Check Rig** checks the profile: the bones of each role, then what the controls really do. Each control written is turned, and its read bone must turn with it; each IK/FK limb is posed in FK, its IK controls snapped and the limb switched to IK, then back: it must stay where it was. The pose is put back and nothing is keyed. The problems are listed in the panel; an error stops **Generate**, which runs the check itself the first time a profile is used. Only problems are reported: a rig whose IK chain is a little shorter than its FK one (Rigify) is fine.
+- **IK/FK Limbs** (sub-panel): for each limb, the FK controls and the bone each one follows, and the IK/FK switch property. **Snap FK to IK** rotates the FK controls onto the current pose on the frames you list (for example `1, 61, 120`, or empty for the current frame), keys them, and switches the limbs to FK. IK keys are kept. **IK snap** (in order): how each IK control follows the generated motion, so the limb plays in IK after generating. **Follow** takes the transform of a bone (with the offset of their rest poses), **Pole** places a pole target in the plane of the limb, **Rest** resets the control. The presets fill it; a limb without it stays in FK after generating.
+- **Advanced** (sub-panel): per role, Use Translation and the offset mode. Limbs default to **Roll**, the spine, neck and head to **Offset**.
+- The menu next to **Check Rig**: **Load Preset**, **Import Profile** / **Export Profile** (JSON, to reuse a profile on a similar rig), **Add Roles** (every role, empty).
+- A rig standing with its bones Y-up (an FBX import) or facing +Y (SMPL) is fine: the model's skeleton stands like the rig.
+- Not supported yet: limbs posed in IK only, with no FK control to write (some older hand-made rigs).
 
 ### Linked rigs and library overrides
 
@@ -131,7 +135,7 @@ Set the profile up in the rig's own file. In a shot file that links the rig, the
 
 ## Generate in-betweens
 
-1. **Choose the character** as **Target** in the Retarget panel. A **Rigify** rig needs nothing else: its rig profile is filled from the Rigify preset as soon as you choose it (any rig whose bones match a preset of the add-on gets it; the Generate panel says which). For another rig, set up its profile in the Rig Profile panel.
+1. **Choose the character** as **Target** in the Retarget panel. A **Rigify**, **Auto-Rig Pro** or **CloudRig** rig, or a skeleton such as a Mixamo character, needs nothing else: its rig profile is set up as soon as you choose it (the Generate panel says how). For another rig, set it up in the Rig Setup panel.
 2. **Key your poses** on the controls of the profile (on Rigify, the FK or IK controls and the torso). Any keyframe type works except **Generated**: Keyframe, Breakdown, Extreme... A frame is a key pose as soon as one of those controls has a key on it.
 3. **Limbs in IK** are handled for you, and stay in IK: the generated motion is written to the FK controls, so before generating, the FK controls of a limb in IK are snapped to its IK pose on each key pose (keyed as normal keys), and the limb is in FK while generating. Then its IK controls (hand, foot, pole, toe...) are snapped to the generated motion on every frame, as Generated keys, and the IK/FK switch goes back to what you left (animated or not). The limb plays the motion in IK: pose it in IK anywhere, and the edited frame is a key pose for the next generation. Your IK keys are kept, and on the key poses the IK controls are keyed as they are. On Rigify the IK arm and leg are a little shorter than the FK ones, so the elbows and knees can sit up to 1 or 2 cm from the FK motion, and an IK knee doesn't fully straighten (where the generated leg straightens, it stays bent a few cm and can pop forward); hands and feet follow the motion. A limb whose rig profile has no IK snap stays in FK after generating; for such a limb, a switch key in IK between two key poses stops the generation (key the switch in FK there, or key a pose on that frame).
 4. In the **Generate** panel, write a **prompt** (what the character does) and choose a **seed**, then click **Generate In-betweens**. The panel and the status bar show the progress: the model's own steps, then the keys being written onto the rig. **Esc** (or the cancel button) stops the generation until the keys are being written; writing takes a few seconds and can't be stopped (Blender stays responsive meanwhile, you can look around but not edit).
@@ -191,16 +195,17 @@ A character can follow several prompts, one after the other: "walks forward" for
 | `migration.py` | Moves setups saved by older versions off the scene |
 | `setup_operators.py` | Bone list setup, translation scale, JSON import/export, corrections |
 | `retarget_operators.py` | Snapping and baking |
-| `profile_operators.py` | Rig profile: presets, roles, JSON, Snap FK to IK |
+| `profile_operators.py` | Rig profile: presets, detection, roles picked in the viewport, Check Rig, JSON, Snap FK to IK |
+| `rig_check.py` | The rig check: profile problems, then what the controls do |
 | `ui.py` | Sidebar panels and lists |
 | `preferences.py` | Add-on preferences: backend, its settings, developer option |
 | `generation.py`, `generate_operators.py` | Generate In-betweens: key poses, request, result as Generated keys; operators |
 | `segment_track.py`, `segment_operators.py` | Prompt segments on the character, kept contiguous; add, remove, split, select |
 | `segment_draw.py`, `segment_mouse.py` | Prompt segments drawn in the animation editors, and handled with the mouse |
-| `core/` | Retargeting core, humanoid roles, neutral motion and skeleton types (see below) |
+| `core/` | Retargeting core, humanoid roles, role detection on a skeleton, neutral motion and skeleton types (see below) |
 | `backends/` | Motion model backends, each in its own folder (`kimodo/`, `interpolate/`), and the protocol with their worker processes |
-| `presets/` | Rig profile presets |
-| `tests/` | Unit tests, headless Blender tests, Kimodo tests (`python tests/run_tests.py`, see the file) |
+| `presets/` | Rig profile presets (Rigify, Auto-Rig Pro, CloudRig) |
+| `tests/` | Unit tests, headless Blender tests, Kimodo tests, real rigs (`python tests/run_tests.py`, see the file) |
 | `blender_manifest.toml` | Extension manifest |
 
 The core can be used from scripts, without the scene properties: `core.retarget.snap.Retargeter(source, target, pairs, translation_scale)` snaps (`snap_pose`) or bakes (`bake(scene, view_layer, frames)`) a list of `BonePair`s, and `core.profile.compose(profile, joint_map, direction)` builds those pairs from a rig profile and a skeleton's role → joint map.

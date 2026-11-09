@@ -246,14 +246,19 @@ class RTGTR_RigProfile(PropertyGroup):
     limbs_active_index: IntProperty(default=0, override=OVERRIDABLE)
     source: StringProperty(name="Preset", description="Preset the profile was loaded from (empty: set up by hand "
                                                       "or imported)", override=OVERRIDABLE)
+    use_controls: BoolProperty(
+        name="Separate Controls", default=True, override=OVERRIDABLE,
+        description="The rig reads one bone per role and writes another, its control (Rigify, Auto-Rig Pro, "
+                    "CloudRig...). Off: each role's bone is read and written (a skeleton: Mixamo, a mocap import...)")
 
     def to_core(self):
         """The profile as a core.profile.RigProfile. Raises ValueError on an invalid profile."""
         result = core_profile.RigProfile()
         for b in self.roles:
+            write_bone = b.write_bone if self.use_controls else b.read_bone
             try:
                 result.roles.append(core_profile.RoleBinding(
-                    role=b.role, read_bone=b.read_bone, write_bone=b.write_bone, offset_mode=b.offset_mode,
+                    role=b.role, read_bone=b.read_bone, write_bone=write_bone, offset_mode=b.offset_mode,
                     use_translation=b.use_translation,
                     corrections={c.backend: tuple(c.rotation) for c in b.corrections},
                 ))
@@ -276,6 +281,7 @@ class RTGTR_RigProfile(PropertyGroup):
         self.limbs.clear()
         self.roles_active_index = 0
         self.limbs_active_index = 0
+        self.use_controls = bool(rig_profile.limbs) or any(b.write_bone != b.read_bone for b in rig_profile.roles)
         for b in rig_profile.roles:
             item = self.roles.add()
             item.role = b.role
@@ -321,11 +327,12 @@ classes = (
 
 
 def update_target(scene, _context):
-    """A character whose rig profile is empty gets the preset matching its bones (Rigify...)"""
+    """A character whose rig profile is empty gets the preset matching its bones (Rigify...), or the roles found on
+    its skeleton (Mixamo...)"""
     target = scene.retargetor_target
     if target is not None and target.type == 'ARMATURE':
-        from .profile_operators import apply_detected_preset
-        apply_detected_preset(target.data)
+        from .profile_operators import apply_detected_profile
+        apply_detected_profile(target.data)
 
 
 def get_character(context):

@@ -346,10 +346,35 @@ def remove_model_armature(obj):
         bpy.data.actions.remove(action)
 
 
-def place_model(model, rig, view_layer):
+def body_rotation(rig, rig_profile):
+    """The rig's body frame at rest in its armature space (core.rig_detect.body_axes) as a rotation: identity for
+    a rig standing on Z and facing -Y, a quarter turn for an FBX import (bones Y-up), a half turn for a skeleton
+    facing +Y. Identity when it can't be measured."""
+    from .core.rig_detect import body_axes
+    bones = rig.data.bones
+
+    def head(role_id):
+        binding = rig_profile.binding(role_id) if rig_profile is not None else None
+        bone = bones.get(binding.read_bone) if binding is not None and binding.read_bone else None
+        return bone.head_local if bone is not None else None
+
+    hips, top = head("hips"), head("head")
+    sides = [(head(f"{role}.L"), head(f"{role}.R")) for role in ("upper_arm", "thigh")]
+    sides = [(left, right) for left, right in sides if left is not None and right is not None]
+    if hips is None or top is None or not sides:
+        return Matrix.Identity(3)
+    try:
+        axes = body_axes(tuple(top - hips), tuple(sides[0][0] - sides[0][1]))
+    except ValueError:
+        return Matrix.Identity(3)
+    return Matrix(axes).transposed()
+
+
+def place_model(model, rig, view_layer, rig_profile=None):
     """Where the rig is, turned like it (not scaled), at rest and without animation. The model's poses are read
     and written in its own armature space: the motion is generated in the character's space, so moving or
-    turning the rig object moves or turns the result the same way."""
+    turning the rig object moves or turns the result the same way. The model also stands like the rig's body
+    at rest (body_rotation): upright for an FBX import whose bones are Y-up, turned around for a rig facing +Y."""
     if model.animation_data is not None and model.animation_data.action is not None:
         action = model.animation_data.action
         model.animation_data.action = None
@@ -359,7 +384,7 @@ def place_model(model, rig, view_layer):
         pose_bone.rotation_mode = 'QUATERNION'
         pose_bone.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
         pose_bone.location = (0.0, 0.0, 0.0)
-    rotation = rig.matrix_world.to_3x3().normalized().to_quaternion()
+    rotation = (rig.matrix_world.to_3x3().normalized() @ body_rotation(rig, rig_profile)).to_quaternion()
     model.matrix_world = Matrix.LocRotScale(rig.matrix_world.to_translation(), rotation, None)
     view_layer.update()
 
@@ -379,7 +404,7 @@ def build_request(context, rig, model, backend, rig_profile, start, end, key_fra
     pairs = core_profile.compose(rig_profile, backend.joint_map, core_profile.TO_MODEL)
     if not pairs:
         raise ValueError(f"No role of the rig profile has a bone to read for {backend.label}.")
-    place_model(model, rig, view_layer)
+    place_model(model, rig, view_layer, rig_profile)
     scale = compute_translation_scale(rig, model, pairs)
     if scale is None:
         raise ValueError(f"Unable to compare the sizes of '{rig.name}' and of the model: map more roles.")
@@ -745,6 +770,7 @@ class GenerationTask:
         self.segment_index = segment
         self.backend = active_backend(context)
         self.rig_profile = self._rig_profile(rig)
+        self._check_rig(context, rig)
         # Generated keys edited since the last generation are user keys (the handler retypes them as soon as they
         # are edited; this catches what it couldn't see): they may be key poses
         retyped, _restored = generated_keys.retype_edited(rig)
@@ -813,24 +839,38 @@ class GenerationTask:
         else:
             self._send_request(context, rig, model)
 
+    def _check_rig(self, context, rig):
+        """The rig check (rig_check.py), once per profile: an error stops the generation before anything changes,
+        a warning is reported"""
+        from . import rig_check
+        from .profile_operators import checked
+        problems = checked(rig, self.rig_profile, context.view_layer)
+        errors = [p for p in problems if p.level == rig_check.ERROR]
+        if errors:
+            more = f" (and {len(errors) - 1} more)" if len(errors) > 1 else ""
+            raise ValueError(f"The rig check found a problem{more}: {errors[0].message}. See the Rig Setup panel.")
+        if problems:
+            more = f" (and {len(problems) - 1} more)" if len(problems) > 1 else ""
+            self.notes.append(f"Rig check: {problems[0].message}{more}")
+
     def _rig_profile(self, rig):
         """The rig's profile; an empty one gets the preset matching the armature's bones (saved on the armature
         when it can be edited, used as is on a linked armature). Raises ValueError if none matches."""
-        from .profile_operators import apply_detected_preset, detect_preset
+        from .profile_operators import apply_detected_profile, describe_source, detect_profile
         armature = rig.data
         if len(armature.retargetor_profile.roles) > 0:
             return armature.retargetor_profile.to_core()
-        name = apply_detected_preset(armature)
-        if name:
+        source = apply_detected_profile(armature)
+        if source:
             self.modified = True
-            self.notes.append(f"Rig profile of '{armature.name}': the preset '{name}' matches its bones, applied")
+            self.notes.append(f"Rig profile of '{armature.name}': {describe_source(source)}, applied")
             return armature.retargetor_profile.to_core()
-        detected = detect_preset(armature)
+        detected = detect_profile(armature)
         if detected is not None:
-            self.notes.append(f"Rig profile of '{armature.name}' (linked): the preset '{detected[0]}' is used")
+            self.notes.append(f"Rig profile of '{armature.name}' (linked): {describe_source(detected[0])}, used")
             return detected[1]
-        raise ValueError(f"The rig profile of '{armature.name}' is empty and no preset matches its bones: map its "
-                         "bones to the humanoid roles in the Rig Profile panel.")
+        raise ValueError(f"The rig profile of '{armature.name}' is empty and its bones weren't recognized: set it "
+                         "up in the Rig Setup panel.")
 
     def _send_request(self, context, rig, model):
         chunk = self.chunks[self.chunk_index]

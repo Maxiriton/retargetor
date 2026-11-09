@@ -84,7 +84,8 @@ class CheckingLayout:
 def draw_panels(panels=None):
     errors = []
     from retargetor import ui
-    for panel in panels or (ui.RETARGETOR_PT_RetargetPanel, ui.RETARGETOR_PT_RigProfilePanel):
+    for panel in panels or (ui.RETARGETOR_PT_RetargetPanel, ui.RETARGETOR_PT_RigProfilePanel,
+                            ui.RETARGETOR_PT_RigLimbsPanel, ui.RETARGETOR_PT_RigAdvancedPanel, ui.RTGTR_MT_ProfileFiles):
         fake = type("Panel", (), {"layout": CheckingLayout(errors)})()
         panel.draw(fake, bpy.context)
     return errors

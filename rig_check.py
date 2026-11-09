@@ -93,11 +93,13 @@ def profile_problems(armature, rig_profile):
                     problems.append(Problem(WARNING, f"{child_role}.{side}",
                                             f"{_label(f'{child_role}.{side}')}: '{child.name}' is not under "
                                             f"'{parent.name}' ({_label(f'{parent_role}.{side}')})"))
-    for role in ("upper_arm", "thigh"):
-        left, right = read_bone(f"{role}.L"), read_bone(f"{role}.R")
-        if left is not None and right is not None and left.head_local.x < right.head_local.x:
-            problems.append(Problem(WARNING, f"{role}.L", f"The left {role.replace('_', ' ')} '{left.name}' is on "
-                                                          f"the right of '{right.name}': are the sides swapped?"))
+    from .core.rig_detect import sides_swapped
+    mapped_bones = {b.role: bones.get(b.read_bone) for b in rig_profile.roles if b.read_bone}
+    mapped_bones = {role: bone for role, bone in mapped_bones.items() if bone is not None}
+    if sides_swapped({r: tuple(b.head_local) for r, b in mapped_bones.items()},
+                     {r: tuple(b.tail_local) for r, b in mapped_bones.items()}):
+        problems.append(Problem(WARNING, "upper_arm.L", "The bones of the left roles are on the character's right "
+                                                        "(its feet point the other way): are the sides swapped?"))
 
     for limb in rig_profile.limbs:
         names = [p.fk_control for p in limb.controls] + [p.followed_bone for p in limb.controls]

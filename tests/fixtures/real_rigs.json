@@ -1,0 +1,36 @@
+{
+    "about": "Real rigs tested by tests/blender/test_rigs.py. The files are not committed (licences, size): a local JSON maps each file key to its path, given to tests/run_tests.py with --rigs (or RETARGETOR_RIGS). Missing files are skipped.",
+    "rigs": [
+        {
+            "file": "mike",
+            "object": "mike_rig",
+            "expect": "Auto-Rig Pro (FK controls)",
+            "source": "Auto-Rig Pro's free demo character Mike (Superhive, Auto-Rig Pro's product page), its Blender 5.2 file"
+        },
+        {
+            "file": "storm",
+            "object": "RIG-storm",
+            "expect": "CloudRig (FK controls)",
+            "source": "Storm, https://studio.blender.org/characters/storm (CC-BY, Blender Foundation), storm_v1.1.blend"
+        },
+        {
+            "file": "mixamo_fbx",
+            "object": "Armature.Stewardess",
+            "expect": "detected",
+            "fbx": true,
+            "source": "A Mixamo character exported as FBX (bones named mixamorig1:...)"
+        },
+        {
+            "file": "mixamo_smpl",
+            "object": "Armature",
+            "expect": "detected",
+            "source": "A Mixamo skeleton without prefix, in a .blend that also holds an SMPL one"
+        },
+        {
+            "file": "mixamo_smpl",
+            "object": "Finalized_Armature",
+            "expect": "detected",
+            "source": "An SMPL skeleton (bones m_avg_..., facing +Y)"
+        }
+    ]
+}
