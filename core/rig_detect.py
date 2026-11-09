@@ -28,8 +28,9 @@ from .roles import ROLES, missing_required
 
 @dataclass(frozen=True)
 class BoneInfo:
-    """A bone as detection sees it. head and tail: rest positions in world space (Z-up), so an armature rotated
-    on import (FBX: Y-up bones under an object turned 90 degrees) is read upright."""
+    """A bone as detection sees it. head and tail: rest positions in the armature's space. Heights are measured
+    along the hips -> head axis, so an armature whose bones are Y-up (an FBX import, the object turned 90 degrees)
+    is read the same way."""
     name: str
     parent: str | None = None
     head: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -241,8 +242,18 @@ def _fill_between(tree, chain, matched, notes):
     return matched
 
 
-def _closest_height(tree, names, height):
-    return min(names, key=lambda name: abs(tree.bones[name].head[2] - height))
+def _height(tree, name, up):
+    """Height of a bone's head along `up` = (origin, unit direction)"""
+    origin, direction = up
+    return sum((h - o) * d for h, o, d in zip(tree.bones[name].head, origin, direction))
+
+
+def _up(tree, hips, head):
+    """(origin, unit direction) from the hips' head to the head's head, or Z when they coincide"""
+    origin, top = tree.bones[hips].head, tree.bones[head].head
+    axis = [t - o for t, o in zip(top, origin)]
+    length = sum(v * v for v in axis) ** 0.5
+    return origin, tuple(v / length for v in axis) if length > 1e-9 else (0.0, 0.0, 1.0)
 
 
 def detect(bones):
@@ -315,8 +326,10 @@ def detect(bones):
             if below:
                 found["spine"] = (below[0], BY_HIERARCHY)
             if len(below) > 1:
-                low, high = tree.bones[below[0]].head[2], tree.bones[upper].head[2]
-                found["chest"] = (_closest_height(tree, below[1:], (low + high) / 2), BY_HIERARCHY)
+                up = _up(tree, hips, head)
+                middle = (_height(tree, below[0], up) + _height(tree, upper, up)) / 2
+                found["chest"] = (min(below[1:], key=lambda name: abs(_height(tree, name, up) - middle)),
+                                  BY_HIERARCHY)
         else:
             result.notes.append("No bone between the hips and the neck: the spine is not mapped")
 

@@ -37,16 +37,55 @@ def _check_limb(rig_obj, limb):
 
 def snap_fk_pose(rig_obj, limbs, view_layer):
     """Rotate the FK controls of the limbs so they match the bones they follow, at the current frame.
-    The followed orientations are all captured first, then the controls are set one by one, parents first."""
+    The followed orientations are all captured first, then the controls are set one by one, parents first, with
+    the limbs switched to FK meanwhile (CloudRig's FK toe changes parent with the switch); the switches are put
+    back afterwards, set_limbs_fk() switches."""
     for limb in limbs:
         _check_limb(rig_obj, limb)
 
     pose_bones = rig_obj.pose.bones
     controls = [pair for limb in limbs for pair in limb.controls]
-    wanted = {pair.fk_control: pose_bones[pair.followed_bone].matrix.to_quaternion() for pair in controls}
-    for pair in controls:
-        pb = pose_bones[pair.fk_control]
-        pb.matrix = Matrix.LocRotScale(pb.matrix.to_translation(), wanted[pair.fk_control], None)
+    # With the offset their rest poses have: Rigify's FK controls and ORG bones are alike at rest, Auto-Rig Pro's
+    # aren't all (its foot control is turned from the foot)
+    wanted = {pair.fk_control: (pose_bones[pair.followed_bone].matrix
+                                @ pose_bones[pair.followed_bone].bone.matrix_local.inverted()
+                                @ pose_bones[pair.fk_control].bone.matrix_local).to_quaternion()
+              for pair in controls}
+    switches = {}
+    for limb in limbs:
+        switch = pose_bones.get(limb.switch_bone) if limb.switch_bone else None
+        if switch is not None and limb.switch_property in switch:
+            switches[(limb.switch_bone, limb.switch_property)] = switch[limb.switch_property]
+            switch[limb.switch_property] = limb.fk_value
+    if switches:
+        rig_obj.update_tag()
+        view_layer.update()
+    try:
+        for pair in controls:
+            _turn_to(rig_obj, pose_bones[pair.fk_control], wanted[pair.fk_control], view_layer)
+    finally:
+        for (bone, prop), value in switches.items():
+            pose_bones[bone][prop] = value
+        if switches:
+            rig_obj.update_tag()
+            view_layer.update()
+
+
+def _turn_to(rig_obj, pb, wanted, view_layer, passes=3):
+    """Give a pose bone the armature-space orientation `wanted` (a Quaternion) through its rotation channels only:
+    its location and scale stay. Through its own constraints too (CloudRig's FK toe hangs from an Armature
+    constraint), taken as a transform applied on top of the bone's own matrix."""
+    from .snap import set_rotation
+    for _ in range(passes):
+        own = rig_obj.convert_space(pose_bone=pb, matrix=pb.matrix_basis, from_space='LOCAL', to_space='POSE')
+        actual = pb.matrix.to_quaternion()
+        if wanted.rotation_difference(actual).angle < PLACE_TOLERANCE or \
+                wanted.rotation_difference(-actual).angle < PLACE_TOLERANCE:
+            return
+        rotation = own.to_quaternion() @ actual.inverted() @ wanted
+        pose = Matrix.LocRotScale(own.to_translation(), rotation, own.to_scale())
+        basis = rig_obj.convert_space(pose_bone=pb, matrix=pose, from_space='POSE', to_space='LOCAL')
+        set_rotation(pb, pb.rotation_mode, basis.to_quaternion())
         view_layer.update()
 
 
@@ -240,6 +279,7 @@ def snap_ik_pose(rig_obj, limbs, view_layer, corrections=None):
                 if snap.ik_control in corrections:
                     wanted[snap.ik_control] = wanted[snap.ik_control] @ corrections[snap.ik_control]
     for step in range(max((len(limb.ik_snap) for limb in limbs), default=0)):
+        placed = []
         for limb in limbs:
             if step >= len(limb.ik_snap):
                 continue
@@ -257,8 +297,43 @@ def snap_ik_pose(rig_obj, limbs, view_layer, corrections=None):
             else:
                 pb.matrix = wanted[snap.ik_control]
                 pb.scale = scale
+                placed.append((pb, wanted[snap.ik_control], snap.mode == IK_POLE, location, rotation, scale))
             _keep_locked(pb, location, rotation)
         view_layer.update()
+        _through_own_constraints(rig_obj, placed, view_layer)
+
+
+# A control placed further than this from where it was wanted is placed again, through its own constraints
+PLACE_TOLERANCE = 1e-4
+
+
+def _through_own_constraints(rig_obj, placed, view_layer, passes=4):
+    """Place again the controls whose own constraints moved them (Auto-Rig Pro's IK controls and poles have Child
+    Of constraints, to the foot or the character's root): setting pose_bone.matrix ignores the bone's own
+    constraints. placed: (pose bone, matrix wanted, position only, location, rotation, scale before). The
+    constraints are taken as a transform applied on top of the bone's own matrix X (the one its basis gives, from
+    its parent): A = C X, so X' = X A^-1 W puts the bone on W."""
+    for _ in range(passes):
+        again = []
+        for pb, wanted, position_only, location, rotation, scale in placed:
+            actual = pb.matrix
+            if (actual.translation - wanted.translation).length < PLACE_TOLERANCE and (
+                    position_only
+                    or wanted.to_quaternion().rotation_difference(actual.to_quaternion()).angle < PLACE_TOLERANCE):
+                continue
+            own = rig_obj.convert_space(pose_bone=pb, matrix=pb.matrix_basis, from_space='LOCAL', to_space='POSE')
+            target = wanted.copy()
+            if position_only:
+                target = actual.copy()
+                target.translation = wanted.translation
+            pb.matrix = own @ actual.inverted() @ target
+            pb.scale = scale
+            _keep_locked(pb, location, rotation)
+            again.append((pb, wanted, position_only, location, rotation, scale))
+        if not again:
+            return
+        view_layer.update()
+        placed = again
 
 
 def _key_types(rig_obj, data_path, frame):

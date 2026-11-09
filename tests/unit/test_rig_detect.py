@@ -51,6 +51,12 @@ class TestSchemes(unittest.TestCase):
             self.assertTrue(all(match.how == rig_detect.BY_NAME for role, match in detection.matches.items()
                                 if roles.get_role(role).group != roles.SPINE), scheme)
 
+    def test_y_up_armature(self):
+        """An FBX import: bones Y-up in the armature's space (the object turned 90 degrees)"""
+        bones = [(name, parent, (h[0], h[2], -h[1]), (t[0], t[2], -t[1]))
+                 for name, parent, h, t in humanoids.skeleton("ue5")]
+        self.assertEqual(found(detect(bone_infos(bones))), humanoids.expected("ue5"))
+
     def test_unnamed_forearm_filled_from_hierarchy(self):
         detection = self.check_scheme("blender")
         self.assertEqual(detection.matches["forearm.L"].how, rig_detect.BY_HIERARCHY)
