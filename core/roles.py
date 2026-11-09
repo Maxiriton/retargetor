@@ -20,8 +20,8 @@ class Role:
     id: str
     label: str
     group: str
-    # Limbs copy the direction of the bone (ROLL). The spine copies the rotation from rest (REST_OFFSET):
-    # both rigs stand upright at rest, and spine bones are laid out differently from rig to rig.
+    # Limbs copy the direction of the bone (ROLL). The spine and the feet copy the rotation from rest (REST_OFFSET):
+    # both rigs stand upright at rest, and those bones are laid out differently from rig to rig.
     default_offset_mode: str
     # Bones that carry the root motion
     default_use_translation: bool = False
@@ -30,8 +30,9 @@ class Role:
     required: bool = False
 
 
-def _side_roles(base_id, label, group, required=False):
-    return [Role(f"{base_id}.{side}", f"{label} ({side})", group, "ROLL", required=required) for side in ("L", "R")]
+def _side_roles(base_id, label, group, required=False, offset_mode="ROLL"):
+    return [Role(f"{base_id}.{side}", f"{label} ({side})", group, offset_mode, required=required)
+            for side in ("L", "R")]
 
 
 ROLES = (
@@ -50,8 +51,11 @@ ROLES = (
     + _side_roles("hand", "Hand", ARM, required=True)
     + _side_roles("thigh", "Thigh", LEG, required=True)
     + _side_roles("shin", "Shin", LEG, required=True)
-    + _side_roles("foot", "Foot", LEG, required=True)
-    + _side_roles("toes", "Toes", LEG)
+    # Feet copy the rotation from rest, like the spine: both rigs stand with their feet flat at rest, but a foot bone
+    # goes from the ankle to the ball on one rig, to the toes or straight forward on another (Phase 6: copying the
+    # direction put Auto-Rig Pro's and CloudRig's characters on tiptoe)
+    + _side_roles("foot", "Foot", LEG, required=True, offset_mode="REST_OFFSET")
+    + _side_roles("toes", "Toes", LEG, offset_mode="REST_OFFSET")
 )
 
 ROLES_BY_ID = {role.id: role for role in ROLES}

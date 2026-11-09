@@ -196,6 +196,26 @@ def main():
         walked = ((rig.matrix_world @ rig.pose.bones[hips].head) - origin) * Vector((1.0, 1.0, 0.0))
         print(f"FINDING Kimodo: walked {walked.length:.2f} m in 2 s")
         checks.check(walked.length > 0.5, "Kimodo: the character walks")
+        # The feet turn from their rest pose like the model's (on tiptoe when a flat foot control was given the
+        # direction of a sloping foot)
+        from retargetor.backends.kimodo.joints import JOINT_MAP
+        model = state.model_armature
+
+        def from_rest(obj, name):
+            pb = obj.pose.bones[name]
+            return ((obj.matrix_world @ pb.matrix).to_quaternion()
+                    @ (obj.matrix_world @ pb.bone.matrix_local).to_quaternion().inverted())
+        gaps = []
+        for frame in range(100, 160, 3):
+            scene.frame_set(frame)
+            for side in ("L", "R"):
+                foot = rig_profile.binding(f"foot.{side}").read_bone
+                gap = from_rest(rig, foot).rotation_difference(from_rest(model, JOINT_MAP[f"foot.{side}"])).angle
+                gaps.append(abs(math.degrees(min(gap, 2 * math.pi - gap))))
+        mean_gap = sum(gaps) / len(gaps)
+        print(f"FINDING Kimodo: the feet turn {mean_gap:.1f} deg away from the model's on average, "
+              f"{max(gaps):.1f} at most")
+        checks.below(mean_gap, 5.0, "Kimodo: the feet turn like the model's (deg)")
     checks.finish()
 
 

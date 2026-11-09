@@ -16,10 +16,11 @@ class BonePair:
         (right for limbs). REST_OFFSET applies the full rotation difference between the two rest poses.
     use_translation: the target also copies the source's movement (root motion), scaled.
     correction: extra rotation (w, x, y, z) applied in the target bone's local space, or None.
-    pivot: for a translated pair, the target-side bone whose head matches the source bone's head, when it
-        isn't the target itself (a rig's hips are read from one bone and written to another control: Rigify's
-        ORG-spine and torso). The source's movement is applied to the pivot, and the target keeps its offset
-        to the pivot, turned with the source. Empty: the target's own head.
+    pivot: the target-side bone that matches the source bone, when it isn't the target itself (a rig is read
+        from one bone and written to another control: Rigify's ORG-spine and torso). For a translated pair, the
+        source's movement is applied to the pivot, and the target keeps its offset to the pivot, turned with the
+        source. For a ROLL pair, the pivot takes the source's direction and the target follows with their rest
+        offset (Auto-Rig Pro's FK foot control is turned 30 degrees from its foot). Empty: the target itself.
     """
     source: str
     target: str

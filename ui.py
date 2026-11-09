@@ -156,6 +156,11 @@ class RETARGETOR_PT_RigProfilePanel(Panel):
 
         if len(profile.roles) > 0:
             layout.label(text=f"Bones {source_label(profile.source)}", icon='PRESET')
+            if len(profile.limbs) > 0:
+                snapped = sum(1 for limb in profile.limbs if len(limb.ik_snap) > 0)
+                layout.label(text=f"{len(profile.limbs)} IK/FK limbs: pose in IK or FK"
+                                  + ("" if snapped == len(profile.limbs) else f" ({len(profile.limbs) - snapped} FK after generating)"),
+                             icon='CON_KINEMATIC')
         else:
             detected = detect_profile(armature)
             if detected is not None:

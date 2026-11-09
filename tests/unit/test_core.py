@@ -42,9 +42,11 @@ class TestPairs(unittest.TestCase):
 
 class TestRoles(unittest.TestCase):
     def test_default_offset_modes(self):
-        # Phase 1 finding: limbs copy the direction (ROLL), the spine copies the rotation from rest
+        # Phase 1 finding: limbs copy the direction (ROLL), the spine copies the rotation from rest. Phase 6: the
+        # feet too (foot bones slope differently from rig to rig)
         for role in roles.ROLES:
-            expected = "REST_OFFSET" if role.group == roles.SPINE else "ROLL"
+            feet = role.id.split(".")[0] in ("foot", "toes")
+            expected = "REST_OFFSET" if role.group == roles.SPINE or feet else "ROLL"
             self.assertEqual(role.default_offset_mode, expected, role.id)
 
     def test_only_hips_carry_translation_by_default(self):
@@ -105,7 +107,8 @@ class TestProfile(unittest.TestCase):
         self.assertTrue(by_target["torso"].use_translation)
         # The model's hips match the rig's ORG-spine, not the torso control: the translation pivots on it
         self.assertEqual(by_target["torso"].pivot, "ORG-spine")
-        self.assertEqual(by_target["hand_fk.L"].pivot, "")
+        # The limbs' joints match the ORG bones too: their direction goes to them, then to the controls
+        self.assertEqual(by_target["hand_fk.L"].pivot, "ORG-hand.L")
         self.assertEqual(by_target["chest"].source, "Chest")
         self.assertEqual(by_target["hand_fk.L"].correction, (0.0, 0.0, 1.0, 0.0))
         self.assertIsNone(by_target["hand_fk.R"].correction)
@@ -113,7 +116,7 @@ class TestProfile(unittest.TestCase):
 
     def test_compose_skips_unknown_roles(self):
         pairs = profile.compose(self.rigify, {"head": "Head"}, profile.FROM_MODEL)
-        self.assertEqual(pairs, [BonePair("Head", "head", "REST_OFFSET", False)])
+        self.assertEqual(pairs, [BonePair("Head", "head", "REST_OFFSET", False, pivot="ORG-spine.006")])
 
     def test_rigify_limbs(self):
         self.assertEqual(len(self.rigify.limbs), 4)

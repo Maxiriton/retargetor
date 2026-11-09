@@ -175,7 +175,7 @@ def main():
             results["generate"] = run_blender(args.blender, "test_generate.py", blend=test_rig, env=env)
             # Its hips control turned on the key poses: between torso (written) and ORG-spine (read)
             results["rig_rigify"] = run_blender(args.blender, "test_rigs.py",
-                                                ["rig", "Rigify human (FK controls)", "--pose", "hips"],
+                                                ["rig", "Rigify", "--pose", "hips"],
                                                 blend=test_rig, env=env)
             if args.gui:
                 results["segment_mouse"] = run_blender_gui(args.blender, "test_segment_mouse.py", test_rig, env,

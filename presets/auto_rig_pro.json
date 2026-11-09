@@ -1,5 +1,5 @@
 {
-    "name": "Auto-Rig Pro (FK controls)",
+    "name": "Auto-Rig Pro",
     "format": "retargetor.rig_profile",
     "version": 1,
     "roles": [
@@ -135,7 +135,7 @@
             "role": "foot.L",
             "read_bone": "foot.l",
             "write_bone": "c_foot_fk.l",
-            "offset_mode": "ROLL",
+            "offset_mode": "REST_OFFSET",
             "use_translation": false,
             "corrections": {}
         },
@@ -143,7 +143,7 @@
             "role": "toes.L",
             "read_bone": "toes_01.l",
             "write_bone": "c_toes_fk.l",
-            "offset_mode": "ROLL",
+            "offset_mode": "REST_OFFSET",
             "use_translation": false,
             "corrections": {}
         },
@@ -167,7 +167,7 @@
             "role": "foot.R",
             "read_bone": "foot.r",
             "write_bone": "c_foot_fk.r",
-            "offset_mode": "ROLL",
+            "offset_mode": "REST_OFFSET",
             "use_translation": false,
             "corrections": {}
         },
@@ -175,7 +175,7 @@
             "role": "toes.R",
             "read_bone": "toes_01.r",
             "write_bone": "c_toes_fk.r",
-            "offset_mode": "ROLL",
+            "offset_mode": "REST_OFFSET",
             "use_translation": false,
             "corrections": {}
         }

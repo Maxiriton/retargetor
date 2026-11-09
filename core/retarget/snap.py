@@ -115,7 +115,7 @@ def _same_matrix(a, b, tolerance=1e-6):
 class _ResolvedPair:
     """A BonePair with its pose bones and rest offsets looked up once."""
     __slots__ = ("pair", "src_pose_bone", "tgt_pose_bone", "roll", "rest_offset", "correction", "rotation_mode",
-                 "pivot_bone", "pivot_pose_bone", "pivot_offset")
+                 "pivot_bone", "pivot_pose_bone", "pivot_offset", "pivot_roll", "pivot_relation")
 
     def __init__(self, source_obj, target_obj, pair):
         self.pair = pair
@@ -129,13 +129,16 @@ class _ResolvedPair:
         self.correction = Quaternion(pair.correction) if pair.correction is not None else None
         # The target keeps its rotation mode (Rigify's shoulders are in Euler, for example)
         self.rotation_mode = self.tgt_pose_bone.rotation_mode
-        self.pivot_bone = self.pivot_pose_bone = self.pivot_offset = None
+        self.pivot_bone = self.pivot_pose_bone = self.pivot_offset = self.pivot_roll = self.pivot_relation = None
         if pair.pivot:
             self.pivot_bone = target_obj.data.bones.get(pair.pivot)
             if self.pivot_bone is None:
                 raise KeyError(f"The pivot bone '{pair.pivot}' does not exist in the armature '{target_obj.name}'.")
             self.pivot_pose_bone = target_obj.pose.bones[pair.pivot]
-            self.pivot_offset = rest_offsets(source_obj, target_obj, pair.source, pair.pivot)[1]
+            self.pivot_roll, self.pivot_offset = rest_offsets(source_obj, target_obj, pair.source, pair.pivot)
+            # The target's rest orientation in the pivot's (armature space)
+            self.pivot_relation = (self.pivot_bone.matrix_local.to_quaternion().inverted()
+                                   @ self.tgt_pose_bone.bone.matrix_local.to_quaternion())
 
 
 class Retargeter:
@@ -231,15 +234,24 @@ class Retargeter:
         if pair.use_translation:
             location = self._scaled_target_location(resolved)
 
-        # A pivot (the bone read on the rig, under the written control): the control is turned so the pivot gets
-        # the source's rotation with their rest offset, keeping how the pivot sits under the control now. The
-        # controls between them may be posed (Rigify's hips control, Auto-Rig Pro's c_root): their pose stays and
-        # isn't counted twice. At rest this is the target's own rest offset.
-        through_pivot = resolved.pivot_pose_bone is not None and add_roll and pair.offset_mode == 'REST_OFFSET'
-        if through_pivot:
-            relation = (resolved.pivot_pose_bone.matrix.to_quaternion().inverted()
-                        @ tgt_pose_bone.matrix.to_quaternion())
-            rotation = rotation @ resolved.pivot_offset @ relation
+        # A pivot (the bone read on the rig, when it isn't the written control). Translated (the hips): the control
+        # is turned so the pivot gets the source's rotation with their rest offset, keeping how the pivot sits under
+        # the control now. The controls between them may be posed (Rigify's hips control, Auto-Rig Pro's c_root):
+        # their pose stays and isn't counted twice. At rest this is the target's own rest offset.
+        # ROLL: the pivot takes the source's direction (and its roll), the control follows with their rest offset
+        # (Auto-Rig Pro's and CloudRig's FK foot controls lie flat, their feet don't). Not translated, REST_OFFSET
+        # needs nothing more: the target's own rest offset is the pivot's composed with theirs.
+        through_pivot = False
+        if resolved.pivot_pose_bone is not None and add_roll:
+            if pair.use_translation and pair.offset_mode == 'REST_OFFSET':
+                relation = (resolved.pivot_pose_bone.matrix.to_quaternion().inverted()
+                            @ tgt_pose_bone.matrix.to_quaternion())
+                rotation = rotation @ resolved.pivot_offset @ relation
+                through_pivot = True
+            elif pair.offset_mode == 'ROLL':
+                rotation = (rotation @ Quaternion(Vector((0.0, 1.0, 0.0)), resolved.pivot_roll)
+                            @ resolved.pivot_relation)
+                through_pivot = True
 
         previous_euler = tgt_pose_bone.rotation_euler.copy()
         tgt_pose_bone.rotation_mode = 'QUATERNION'

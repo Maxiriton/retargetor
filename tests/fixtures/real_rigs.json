@@ -4,13 +4,13 @@
         {
             "file": "mike",
             "object": "mike_rig",
-            "expect": "Auto-Rig Pro (FK controls)",
+            "expect": "Auto-Rig Pro",
             "source": "Auto-Rig Pro's free demo character Mike (Superhive, Auto-Rig Pro's product page), its Blender 5.2 file"
         },
         {
             "file": "storm",
             "object": "RIG-storm",
-            "expect": "CloudRig (FK controls)",
+            "expect": "CloudRig",
             "source": "Storm, https://studio.blender.org/characters/storm (CC-BY, Blender Foundation), storm_v1.1.blend"
         },
         {
