@@ -164,10 +164,7 @@ Second branch (`claude/xenodochial-antonelli-6a5386`): one segment regenerated a
 - [x] Prompt segments, visible in the timeline: stored on the character, contiguous, drawn as bands in the Dope Sheet, Timeline and Graph Editor, edited with the mouse like NLA strips and in the Generate panel.
 - [x] Regenerate a single segment without touching the rest (second branch): one prompt segment; between two key poses, split the track there.
 - [x] Transitions between segments: the model's own (Kimodo's multi-prompt generation), the whole track in one request; a backend that can't chain prompts gets one request per segment, without transition.
-- [ ] Root path drawing (when the backend supports it).
-- [ ] Ghost preview of the model's skeleton (nice-to-have).
-- [ ] Clear error messages, progress and cancel (a first version is in Phase 3).
-- [ ] Faster writing for fast or real-time models: compute the controls' values without scene updates (today about 22 ms per frame on Rigify), or preview on the model's armature while generating.
+The other items move to the [next version](#next-version) (decided below).
 
 ### Phase 6: rig setup for any rig
 
@@ -178,9 +175,28 @@ Goal: a rig other than Rigify (Auto-Rig Pro, Mixamo, a studio's own rig...) is e
 - [ ] Help to fill the profile in (guided steps, pick the bones in the viewport, check the result before generating).
 - [ ] Tests on several rigs.
 
-### Phase 7: release
+### Phase 7: models setup and a second model
 
-- [ ] Documentation and packaging; choose the final name (it should not contain "Kimodo").
+Goal: the add-on installs and checks the models itself, and works with a second real model. Today a backend only starts and loads its model: the user must create its Python environment, install its packages and download its weights by hand (the Kimodo venv was made by a third-party add-on), and a setup problem shows up only as an error when generating. The tasks are leads, to be refined when the phase starts:
+
+- [ ] Install a model from the add-on: its Python environment, its packages (with the right torch and CUDA build), its weights. Each backend declares what it needs; the add-on runs the steps with progress and can be resumed or repaired.
+- [ ] Gated weights (Kimodo and ARDY both use Meta-Llama-3-8B-Instruct as text encoder): the user requests access and signs in to Hugging Face themselves; the add-on says what is missing and where to go, and never asks for, stores or sends the token.
+- [ ] Check the setup: per backend, a check that says what is ready and what is not (Python environment, packages, GPU and its memory, weights present, model loads), with a clear message and the fix for each failure.
+- [ ] Several models installed: choose the active one, see what each supports, remove one.
+- [ ] Test the add-on with [ARDY](https://research.nvidia.com/labs/sil/projects/ardy/) (NVIDIA, July 2026): autoregressive, streams its motion, 4 diffusion steps (33 ms of latency on average, per its paper), takes text, root paths, waypoints and keyframes. A second real backend checks that the backend interface holds (streaming, its own skeleton and constraints) and that nothing outside `backends/` names a model.
+
+### Phase 8: release
+
+- [ ] Documentation and packaging; choose the final name (it should not contain "Kimodo" or any other model's name).
+
+### Next version
+
+Left from Phase 5, important but kept for after the first release:
+
+- [ ] Root path drawing (when the backend supports it).
+- [ ] Ghost preview of the model's skeleton (nice-to-have).
+- [ ] Clear error messages, progress and cancel (a first version is in Phase 3).
+- [ ] Faster writing for fast or real-time models: compute the controls' values without scene updates (today about 22 ms per frame on Rigify), or preview on the model's armature while generating. ARDY (Phase 7) may bring it forward.
 
 ## Decisions
 
@@ -226,7 +242,8 @@ Goal: a rig other than Rigify (Auto-Rig Pro, Mixamo, a studio's own rig...) is e
 | 2026-11-05 | Prompt segments (Phase 5, first branch), the user's decisions: drawn by the add-on as bands per character in the Dope Sheet, Timeline and Graph Editor (not scene markers: shared by every character and mixed with the user's); contiguous, one track per character like Kimodo's prompt timeline, the key poses constraints inside them; this branch does the segments and the whole track with transitions, regenerating a single segment is the next branch. The look of the bands chosen on mockups drawn in the user's Blender (variant D: prompt, frames and seed, transition gradient, key poses, "modified" hatching). The bands are the UI's entry point, handled like NLA strips (click, drag, double click, menu); the Generate panel shows the active segment. No segment means one prompt as before; the first segment is made from the prompt, seed and range. One selected segment at a time; colours by position in the track. |
 | 2026-11-05 | Transitions between segments are the model's job, never the add-on's: no blending made by the add-on. A backend generating a track of prompts declares `Capabilities.prompt_segments` and gets it in one request (Kimodo: its multi-prompt generation); otherwise one request per segment, each starting on the previous segment's last frame, without transition. |
 | 2026-11-06 | Regenerating one segment (Phase 5, second branch), the user's decisions: the motion around it constrains it, sent to the backend as context (`GenerationRequest.context_before` / `context_after`, a few frames on each side read from the rig, never written back) and joined by the model, never blended by the add-on; a backend declares `Capabilities.motion_context` and `context_duration` (Kimodo: its 5 transition frames, constrained like the start of a multi-prompt segment). A neighbour never generated is not joined. A backend without it regenerates the segment from the previous segment's last frame, without transition, and says so. Only the segment's frames are written and only it is marked generated; one undo step. Entry points: the segment's menu and popup, the Retargetor menu of the animation editors, the Generate panel. Regenerating "between two key poses" without segments: split the track at the key poses. |
+| 2026-11-09 | Phase 5 stops after its two branches (prompt segments, one segment regenerated): root path drawing, ghost preview, error messages and faster writing move to the next version, after the first release. A new Phase 7, models setup and a second model, comes after the rig setup (Phase 6) and before the release (now Phase 8): the add-on installs the models and checks their setup, and is tested with ARDY. |
 
 ## Open questions
-- Kimodo's code and weights licence, and what it means for distributing the extension.
+- The models' code and weights licences (Kimodo; ARDY: code Apache-2.0, weights under the NVIDIA Open Model License), and what they mean for distributing the extension.
 - Use GitHub issues for the tasks, or this file only?
