@@ -374,6 +374,87 @@ def main():
     kimodo_chunks = generation.generation_chunks(state, get("kimodo"), 1, 120)
     checks.check(len(kimodo_chunks) == 1 and len(kimodo_chunks[0].segments) == 2,
                  "a backend generating segments in one pass gets them in one request")
+
+    # 2d. One segment regenerated alone: the motion around it is sent (the interpolation backend continues it), only
+    # its frames are written, the rest of the track stays as it is
+    # Two key poses in each segment, counting the frame before it (the interpolation backend generates them one by
+    # one, each from the previous one's last frame)
+    segment_track.write_track(state, [PromptSegment(1, 61, "walks", 1), PromptSegment(62, 90, "runs", 2),
+                                      PromptSegment(91, 120, "stops", 3)])
+    checks.check(generation.GenerationTask().run(bpy.context, rig), "the whole track of 3 segments")
+    # A key pose added in segment 2 (the head turned): regenerating segment 2 must go through it
+    head = 'pose.bones["head"].rotation_quaternion'
+    scene.frame_set(75)
+    rig.pose.bones["head"].rotation_quaternion = (0.94, 0.0, 0.0, 0.34)
+    rig.keyframe_insert(head, frame=75, keytype='KEYFRAME')
+    state.segments[0].prompt = "walks slowly"  # segment 1 edited: it stays "modified"
+    keys_before = keys_by_type(rig, generation)
+    task = generation.GenerationTask()
+    checks.check(task.run(bpy.context, rig, segment=1), "segment 2 regenerated alone")
+    request = task.request
+    checks.check((request.start_frame, request.end_frame, sorted(request.key_poses)) == (62, 90, [75, 90]),
+                 f"the request: segment 2 and its key poses ({request.start_frame}-{request.end_frame}, "
+                 f"{sorted(request.key_poses)})")
+    checks.check((request.context_before.start_frame, request.context_before.end_frame,
+                  request.context_after.start_frame, request.context_after.end_frame) == (61, 61, 91, 91),
+                 "the motion around it: one frame on each side for the interpolation backend")
+    after_keys = keys_by_type(rig, generation)
+    outside = {c: {f: v for f, v in frames.items() if not 62 <= f <= 90} for c, frames in after_keys.items()}
+    outside_before = {c: {f: v for f, v in frames.items() if not 62 <= f <= 90} for c, frames in keys_before.items()}
+    checks.check(outside == outside_before, "the rest of the track is unchanged (values and types)")
+    changed = [(c, f, v, user_keys(after_keys).get(c, {}).get(f)) for c, frames in user_keys(keys_before).items()
+               for f, v in frames.items() if user_keys(after_keys).get(c, {}).get(f) != v]
+    checks.check(not changed, f"user keys untouched ({changed[:4]})")
+    # Keying the head over its Generated keys kept them Generated (Blender keeps a replaced key's type): the
+    # generation retyped them as Keyframes, the only new user keys
+    added = {(c[0], f) for c, frames in user_keys(after_keys).items() for f in frames
+             if f not in user_keys(keys_before).get(c, {})}
+    checks.check(added == {(head, 75)}, f"the head's key pose retyped as Keyframes, nothing else ({added})")
+    curve = ('pose.bones["upper_arm_fk.L"].rotation_quaternion', 0)
+    user = {f for f, (_v, t) in keys_before[curve].items() if t != 'GENERATED'}
+    generated = {f for f, (_v, t) in after_keys[curve].items() if t == 'GENERATED' and 62 <= f <= 90}
+    checks.check(generated == set(range(62, 91)) - user, "GENERATED keys on segment 2")
+    checks.check(task.result[0] > 0 and task.result[1] > 0,
+                 f"its frames written, its old Generated keys replaced ({task.result})")
+    # Through the new key pose, joining the motion before it: the head halfway between frame 61 and 75
+    expected = {}
+    for frame in (61, 68, 75):
+        scene.frame_set(frame)
+        expected[frame] = rig.pose.bones["ORG-spine.006"].matrix.to_quaternion()
+    middle = expected[61].slerp(expected[75], 0.5)
+    checks.below(math.degrees(middle.rotation_difference(expected[68]).angle), 0.5,
+                 "the head halfway from the motion before (frame 61) to the new key pose (deg)")
+    states = [segment_track.segment_state(item) for item in state.segments]
+    checks.check(states == ['MODIFIED', 'GENERATED', 'GENERATED'], f"only segment 2 marked generated ({states})")
+    # A neighbour never generated isn't continued
+    state.segments[2].generated = ""
+    task = generation.GenerationTask()
+    checks.check(task.run(bpy.context, rig, segment=1), "segment 2 next to a segment never generated")
+    checks.check(task.request.context_before is not None and task.request.context_after is None,
+                 "the segment never generated is not continued")
+    checks.check(any("segment 3 (after)" in note for note in task.notes), f"the report says so ({task.notes})")
+    # The operator, on the active segment
+    state.segments_active_index = 0
+    checks.check(bpy.ops.retargetor.regenerate_segment('EXEC_DEFAULT') == {'FINISHED'},
+                 "Regenerate Segment, on the active segment")
+    states = [segment_track.segment_state(item) for item in state.segments]
+    checks.check(states == ['GENERATED', 'GENERATED', 'NEW'], f"segment 1 generated, segment 3 still new ({states})")
+    checks.check(draw_generate_panel() == [], "Generate panel draws the Regenerate button")
+    # Kimodo gets about 5 model frames on each side; a backend that doesn't continue the motion gets the segment
+    # from the frame before it, without context
+    state.segments[2].generated = segment_track.generated_signature(state.segments[2])
+    chunk, _notes = generation.segment_chunk(state, get("kimodo"), 1, 30.0)
+    checks.check((chunk.context_before, chunk.context_after, chunk.request_start) == ((57, 61), (91, 95), 62),
+                 f"Kimodo: 5 frames on each side ({chunk.context_before}, {chunk.context_after})")
+    from retargetor.backends.base import Backend, Capabilities
+    plain = type("Plain", (Backend,), {"label": "Plain", "capabilities": Capabilities(min_key_poses=2)})()
+    chunk, notes = generation.segment_chunk(state, plain, 1, 30.0)
+    checks.check((chunk.context_before, chunk.context_after, chunk.request_start) == (None, None, 61)
+                 and "without transition" in notes[0], "without motion_context: from the frame before, no transition")
+    for curve in generation.bone_fcurves(rig, ["head"]):
+        for p in list(curve.keyframe_points):
+            if round(p.co.x) == 75 and p.type != 'GENERATED':
+                curve.keyframe_points.remove(p)
     state.segments.clear()
 
     # 3. An arm in IK (its IK controls at rest): its FK controls are snapped to the IK pose on the key poses,

@@ -5,9 +5,16 @@ work in its own process; the add-on only knows what is declared here.
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 from dataclasses import dataclass
+
+# Inside the add-on this module is <add-on>.backends.base; in the unit tests, backends.base
+try:
+    from ..core.segments import PromptSegment
+except ImportError:
+    from core.segments import PromptSegment
 
 
 @dataclass(frozen=True)
@@ -26,12 +33,17 @@ class Capabilities:
     segments one after the other, each one a request of its own, without transition.
     transition_duration: with prompt_segments, seconds before each boundary where the backend blends the previous
     segment into the next one (shown in the timeline).
+    motion_context: continues the motion around the range (GenerationRequest.context_before / context_after), so a
+    single prompt segment can be regenerated without a jump where it meets its neighbours. context_duration: seconds
+    of that motion it needs on each side (the add-on sends at least one frame more).
     """
     prompt: bool = False
     min_key_poses: int = 2
     partial_poses: bool = False
     prompt_segments: bool = False
     transition_duration: float = 0.0
+    motion_context: bool = False
+    context_duration: float = 0.0
     seed: bool = False
     max_duration: float | None = None
     native_fps: float | None = None
@@ -103,9 +115,42 @@ class Backend:
                         f"segment {i + 1}, frames {segment.start_frame}-{segment.end_frame}).")
         return ""
 
+    def context_frame_count(self, fps):
+        """How many frames of the motion around a range to send on each side (0: the backend takes none)"""
+        caps = self.capabilities
+        if not caps.motion_context:
+            return 0
+        return math.ceil(caps.context_duration * fps - 1e-6) + 1
+
+    def segment_problem(self, segment, fps, key_frames, before=False, after=False):
+        """Why the backend can't regenerate one prompt segment (core.segments.PromptSegment) with key poses on
+        key_frames, or "" if it can. before / after: whether the motion on that side is sent as context
+        (motion_context); each side counts as a key pose for min_key_poses. Without motion_context, the segment is
+        generated from the frame before it when `before` (as a segment of a track generated one by one)."""
+        caps = self.capabilities
+        duration = segment.frame_count / fps
+        if caps.max_duration is not None and duration > caps.max_duration + 1e-6:
+            return (f"Frames {segment.start_frame}-{segment.end_frame} span {duration:.2f} s: {self.label} "
+                    f"generates at most {caps.max_duration:g} s per segment.")
+        first = segment.start_frame - 1 if before and not caps.motion_context else segment.start_frame
+        count = sum(1 for frame in key_frames if first <= frame <= segment.end_frame)
+        if caps.motion_context:
+            count += int(before) + int(after)
+        if count < caps.min_key_poses:
+            return (f"{self.label} needs at least {caps.min_key_poses} key poses to regenerate frames "
+                    f"{segment.start_frame}-{segment.end_frame} ({count}, the motion around them included).")
+        return ""
+
     def check_request(self, request):
         """Raises ValueError if the backend can't generate this request."""
-        if request.segments:
+        context = request.context_before is not None or request.context_after is not None
+        if context and not self.capabilities.motion_context:
+            raise ValueError(f"{self.label} doesn't continue the motion around a range.")
+        if context:
+            segment = PromptSegment(request.start_frame, request.end_frame)
+            problem = self.segment_problem(segment, request.fps, list(request.key_poses),
+                                           request.context_before is not None, request.context_after is not None)
+        elif request.segments:
             if not self.capabilities.prompt_segments:
                 raise ValueError(f"{self.label} doesn't generate prompt segments in one request.")
             problem = self.segments_problem(request.segments, request.fps, list(request.key_poses))

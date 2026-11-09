@@ -25,7 +25,10 @@ class KimodoBackend(Backend):
     capabilities = Capabilities(prompt=True, seed=True, max_duration=joints.MAX_DURATION,
                                 native_fps=joints.MODEL_FPS, min_key_poses=0, partial_poses=True,
                                 prompt_segments=True,
-                                transition_duration=joints.TRANSITION_FRAMES / joints.MODEL_FPS)
+                                transition_duration=joints.TRANSITION_FRAMES / joints.MODEL_FPS,
+                                # The motion around a regenerated segment: as many model frames as a transition
+                                motion_context=True,
+                                context_duration=(joints.TRANSITION_FRAMES - 1) / joints.MODEL_FPS)
     joint_map = dict(joints.JOINT_MAP)
 
     def settings_class(self):

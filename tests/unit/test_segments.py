@@ -13,7 +13,7 @@ if REPO not in sys.path:
 
 from backends.base import Backend, Capabilities  # noqa: E402
 from core import segments as seg  # noqa: E402
-from core.motion import GenerationRequest, Pose  # noqa: E402
+from core.motion import GenerationRequest, Motion, Pose  # noqa: E402
 from core.segments import PromptSegment  # noqa: E402
 
 
@@ -128,6 +128,47 @@ class TestRequests(unittest.TestCase):
         OnePass().check_request(request)
         with self.assertRaises(ValueError):
             EachSegment().check_request(request)
+
+    def test_request_context(self):
+        """The motion around a regenerated segment: next to the range, checked, sent, refused by a backend that
+        doesn't continue it"""
+        pose = Pose({"root": (1.0, 0.0, 0.0, 0.0)}, (0.0, 0.0, 1.0))
+        before = Motion(24.0, 6, [pose] * 5)  # frames 6-10
+        after = Motion(24.0, 41, [pose] * 5)
+        request = GenerationRequest(11, 40, 24.0, {20: pose}, context_before=before, context_after=after)
+        again = GenerationRequest.from_dict(request.to_dict())
+        self.assertEqual((again.context_before.start_frame, again.context_before.end_frame), (6, 10))
+        self.assertEqual((again.context_after.start_frame, len(again.context_after.poses)), (41, 5))
+        self.assertIsNone(GenerationRequest.from_dict(GenerationRequest(1, 40, 24.0).to_dict()).context_before)
+        with self.assertRaisesRegex(ValueError, "end on frame 11"):
+            GenerationRequest(12, 40, 24.0, context_before=before)
+        with self.assertRaisesRegex(ValueError, "start on frame 40"):
+            GenerationRequest(11, 39, 24.0, context_after=after)
+        with self.assertRaisesRegex(ValueError, "fps"):
+            GenerationRequest(11, 40, 25.0, context_before=before)
+
+        class Continuing(Backend):
+            label = "Continuing"
+            capabilities = Capabilities(max_duration=10.0, min_key_poses=2, motion_context=True,
+                                        context_duration=4 / 30)
+
+        class Plain(Backend):
+            label = "Plain"
+            capabilities = Capabilities(max_duration=10.0, min_key_poses=2)
+
+        self.assertEqual(Continuing().context_frame_count(30.0), 5)
+        self.assertEqual(Continuing().context_frame_count(24.0), 5)  # 4 frames span 0.125 s < 4/30 s
+        self.assertEqual(Plain().context_frame_count(30.0), 0)
+        Continuing().check_request(request)  # one key pose and the motion on both sides
+        with self.assertRaisesRegex(ValueError, "around"):
+            Plain().check_request(request)
+        segment = PromptSegment(11, 40)
+        self.assertIn("at least 2", Continuing().segment_problem(segment, 24.0, [], before=True))
+        self.assertEqual(Continuing().segment_problem(segment, 24.0, [], before=True, after=True), "")
+        # Without context, a segment after another one is generated from that one's last frame
+        self.assertEqual(Plain().segment_problem(segment, 24.0, [10, 20], before=True), "")
+        self.assertIn("at least 2", Plain().segment_problem(segment, 24.0, [10, 20]))
+        self.assertIn("at most 10", Plain().segment_problem(PromptSegment(1, 241), 24.0, [1, 241]))
 
 
 if __name__ == "__main__":

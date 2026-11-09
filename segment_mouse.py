@@ -208,6 +208,9 @@ class RTGTR_OT_SegmentEdit(Operator):
         row.prop(item, "frame_end")
         if caps.seed:
             layout.prop(item, "seed")
+        if rig == context.scene.retargetor_target:
+            layout.operator_context = 'INVOKE_DEFAULT'
+            layout.operator("retargetor.regenerate_segment", text="Regenerate", icon='FILE_REFRESH').index = self.index
 
     def execute(self, context):
         return {'FINISHED'}
@@ -230,7 +233,9 @@ class RTGTR_MT_SegmentMenu(Menu):
         layout.operator("retargetor.segment_add", icon='ADD')
         layout.operator("retargetor.segment_remove", icon='REMOVE')
         layout.separator()
-        layout.operator("retargetor.generate_inbetweens", icon='ANIM')
+        props = layout.operator("retargetor.regenerate_segment", icon='FILE_REFRESH')
+        props.index = index
+        layout.operator("retargetor.generate_inbetweens", text="Generate Whole Track", icon='ANIM')
 
 
 classes = (

@@ -1,7 +1,7 @@
 """Generate In-betweens with Kimodo (needs the Kimodo venv and a CUDA GPU), on the Phase 1 Rigify rig.
 
     blender -b --factory-startup <rig_keyposes.blend> --python tests/blender/test_generate_kimodo.py --
-        <base|heading|fps24|range|ik|partial|segments> <kimodo python> <out dir> [<spike rig_result.json dump>]
+        <base|heading|fps24|range|ik|partial|segments|segment> <kimodo python> <out dir> [<spike rig_result.json dump>]
 
 base:    key poses on frames 1, 61, 120 at 30 fps, prompt and seed of the Phase 1 spike. Writes the rig's motion
          to <out dir>/base.json. Compared with the spike's result if its dump is given (tests/run_tests.py
@@ -18,6 +18,8 @@ range:   custom ranges: the prompt alone (no key pose, the character turned 90 d
          pose, ending on one key pose.
 segments: on rig_keyposes_ik.blend, three prompt segments of 5 s (15 s in all, past Kimodo's 10 s), the key poses in
          the first one: one request, key poses untouched, no jump where the segments meet, same seeds same motion.
+segment: on rig_keyposes_ik.blend, the same track generated, then its second segment regenerated alone with another
+         prompt and seed: the rest of the track unchanged, no jump where the segment meets its neighbours.
 """
 import json
 import math
@@ -88,12 +90,12 @@ def compare(a, b, pairs, transform=Matrix.Identity(4)):
     return sum(angles) / len(angles), max(angles), sum(dists) / len(dists), max(dists)
 
 
-def generate(checks, label):
+def generate(checks, label, segment=None):
     rig = bpy.data.objects["rig"]
     from retargetor import generation
     task = generation.GenerationTask()
     start = time.perf_counter()
-    ok = task.run(bpy.context, rig)
+    ok = task.run(bpy.context, rig, segment=segment)
     checks.check(ok and task.result is not None, f"{label}: generated")
     print(f"FINDING {label}: {time.perf_counter() - start:.1f} s in all; " +
           ", ".join(f"{name} {seconds:.2f} s" for name, seconds in task.timings.items()))
@@ -495,6 +497,81 @@ def run_segments(checks, kimodo_python):
     checks.below(worst_dist, 0.1, "same seeds: same motion, worst head (cm)")
 
 
+def all_keys(rig):
+    """{(data_path, index): {frame: (value, type)}} for every F-curve of the rig"""
+    from retargetor import generation
+    return {(fc.data_path, fc.array_index): {round(p.co.x): (p.co.y, p.type) for p in fc.keyframe_points}
+            for fc in generation.bone_fcurves(rig)}
+
+
+def boundary_jumps(checks, rig, boundaries, label):
+    """Around each boundary, the motion moves no more than inside the segments (99% of their frames)"""
+    steps = frame_steps(rig, list(range(2, 451)))
+    inside = [step for frame, step in steps.items() if all(abs(frame - b) > 6 for b in boundaries)]
+    hips_limit = sorted(h for h, _t in inside)[int(0.99 * len(inside))]
+    turn_limit = sorted(t for _h, t in inside)[int(0.99 * len(inside))]
+    for boundary in boundaries:
+        near = [steps[f] for f in range(boundary - 6, boundary + 7)]
+        hips, turn = max(h for h, _t in near), max(t for _h, t in near)
+        print(f"FINDING {label}: around frame {boundary}, hips {hips:.2f} cm and limbs {turn:.2f} deg per frame at "
+              f"most (99% of the frames inside the segments: {hips_limit:.2f} cm, {turn_limit:.2f} deg)")
+        checks.below(hips, 1.5 * hips_limit, f"{label}: no hips jump at frame {boundary} (cm/frame)")
+        checks.below(turn, 1.5 * turn_limit, f"{label}: no limb jump at frame {boundary} (deg/frame)")
+
+
+def run_segment(checks, kimodo_python):
+    rig = setup(kimodo_python)
+    from retargetor import segment_track
+    from retargetor.core.segments import PromptSegment
+    state = rig.retargetor
+    segment_track.write_track(state, [PromptSegment(*segment) for segment in SEGMENTS])
+    key_frames = [1, 61, 120]
+    generate(checks, "the whole track (starts Kimodo)")
+    state.segments[0].prompt = "A person walks forward slowly and raises both arms"  # edited, not regenerated
+    outside = [f for f in range(1, 451) if not 151 <= f <= 300]
+    motion_before = motion_snapshot(rig, range(1, 451))
+    keys_before = all_keys(rig)
+
+    # Segment 2 (frames 151-300) regenerated alone, with another prompt and seed
+    state.segments[1].prompt = "A person turns right and crouches"
+    state.segments[1].seed = 7
+    task = generate(checks, "segment 2 regenerated alone", segment=1)
+    request = task.request
+    checks.check((request.start_frame, request.end_frame, request.prompt, request.seed, request.key_poses)
+                 == (151, 300, "A person turns right and crouches", 7, {}),
+                 "the request: segment 2, its prompt and seed, no key pose in it")
+    checks.check((request.context_before.start_frame, request.context_before.end_frame,
+                  request.context_after.start_frame, request.context_after.end_frame) == (146, 150, 301, 305),
+                 "the motion around it: 5 frames on each side")
+    states = [segment_track.segment_state(item) for item in state.segments]
+    checks.check(states == ['MODIFIED', 'GENERATED', 'GENERATED'], f"only segment 2 marked generated ({states})")
+
+    keys_after = all_keys(rig)
+    changed = [(c, f) for c in set(keys_before) | set(keys_after)
+               for f in set(keys_before.get(c, {})) | set(keys_after.get(c, {}))
+               if not 151 <= f <= 300 and keys_before.get(c, {}).get(f) != keys_after.get(c, {}).get(f)]
+    checks.check(not changed, f"the keys outside segment 2 are unchanged ({len(changed)}: {changed[:3]})")
+    motion_after = motion_snapshot(rig, range(1, 451))
+    _ma, worst_angle, _md, worst_dist = compare(motion_before, motion_after, [(f, f) for f in outside])
+    checks.below(worst_dist, 1e-3, "the motion outside segment 2 is unchanged, worst head (cm)")
+    checks.below(worst_angle, 1e-3, "the motion outside segment 2 is unchanged, worst direction (deg)")
+    mean_angle, _wa, mean_dist, _wd = compare(motion_before, motion_after, [(f, f) for f in range(151, 301)])
+    print(f"FINDING segment 2 regenerated: {mean_dist:.1f} cm, {mean_angle:.1f} deg from the previous motion on average")
+    checks.check(mean_dist > 5.0, f"segment 2 is a new motion ({mean_dist:.1f} cm from the previous one)")
+    key_poses_kept(checks, rig, {f: motion_before[f] for f in key_frames}, "segment 2 regenerated")
+    boundary_jumps(checks, rig, [151, 301], "segment 2 regenerated")
+    # Frame by frame across each boundary: the step onto the regenerated segment, or off it, is like its neighbours
+    for boundary in (151, 301):
+        steps = frame_steps(rig, list(range(boundary - 4, boundary + 5)))
+        print(f"FINDING segment 2 regenerated, steps around frame {boundary} (cm, deg): " +
+              ", ".join(f"{f}: {h:.2f} {t:.1f}" for f, (h, t) in steps.items()))
+        around = [steps[f] for f in steps if f != boundary]
+        checks.below(steps[boundary][0], 2.0 * max(h for h, _t in around) + 0.1,
+                     f"segment 2 regenerated: hips step onto frame {boundary} like the frames around it (cm)")
+        checks.below(steps[boundary][1], 2.0 * max(t for _h, t in around) + 0.5,
+                     f"segment 2 regenerated: limbs step onto frame {boundary} like the frames around it (deg)")
+
+
 def main():
     args = bootstrap.script_args()
     mode, kimodo_python, out_dir = args[0], args[1], args[2]
@@ -515,6 +592,8 @@ def main():
             run_partial(checks, kimodo_python)
         elif mode == "segments":
             run_segments(checks, kimodo_python)
+        elif mode == "segment":
+            run_segment(checks, kimodo_python)
     finally:
         from retargetor.backends import registry
         registry.stop_all()

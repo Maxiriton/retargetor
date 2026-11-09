@@ -15,7 +15,7 @@ from mathutils import Matrix
 from . import generated_keys, segment_track
 from .backends import process, protocol, registry
 from .core import profile as core_profile
-from .core.motion import GenerationRequest
+from .core.motion import GenerationRequest, Motion
 from .core.pose_io import read_pose, write_motion_fcurves
 from .core.retarget.fk_snap import ik_offsets, key_ik_controls, set_limbs_fk, snap_fk_keys, snap_ik_keys
 from .core.retarget.snap import Retargeter, compute_translation_scale
@@ -367,12 +367,13 @@ def place_model(model, rig, view_layer):
 ### Request and result
 
 def build_request(context, rig, model, backend, rig_profile, start, end, key_frames, prompt="", seed=None,
-                  keyed=None, segments=None):
+                  keyed=None, segments=None, context_before=None, context_after=None):
     """Snap the model to the rig on each key frame, and on the start frame (the request's origin), and read
     its poses. keyed: {frame: ids of the roles keyed there}, for a backend taking partial poses (None: every
     key pose is whole). segments: prompt segments (core) covering start to end, for a backend generating them in
-    one pass (prompt and seed unused). Returns (GenerationRequest, translation scale rig -> model, retargeting
-    errors)."""
+    one pass (prompt and seed unused). context_before / context_after: (first, last) frames of the motion around
+    the range to send as it plays on the rig, for a backend continuing it (None: none). Returns (GenerationRequest,
+    translation scale rig -> model, retargeting errors)."""
     scene, view_layer = context.scene, context.view_layer
     skeleton = armature_skeleton(model)
     pairs = core_profile.compose(rig_profile, backend.joint_map, core_profile.TO_MODEL)
@@ -385,9 +386,13 @@ def build_request(context, rig, model, backend, rig_profile, start, end, key_fra
     retargeter = Retargeter(rig, model, pairs, scale[0])
 
     poses = {}
+    around = {}
+    for side, frames in (("before", context_before), ("after", context_after)):
+        if frames is not None:
+            around[side] = list(range(frames[0], frames[1] + 1))
     original_frame = scene.frame_current
     try:
-        for frame in sorted(set(key_frames) | {start}):
+        for frame in sorted(set(key_frames) | {start} | {f for frames in around.values() for f in frames}):
             scene.frame_set(frame)
             retargeter.snap_pose(view_layer)
             poses[frame] = read_pose(model, skeleton.names, skeleton.root, world=False)
@@ -395,16 +400,18 @@ def build_request(context, rig, model, backend, rig_profile, start, end, key_fra
         scene.frame_set(original_frame)
 
     caps = backend.capabilities
+    fps = scene.render.fps / scene.render.fps_base
+    motions = {side: Motion(fps, frames[0], [poses[f] for f in frames]) for side, frames in around.items()}
     if keyed is not None and caps.partial_poses:
         written = {b.role for b in rig_profile.roles if b.write_bone and b.role in backend.joint_map}
         for frame in key_frames:
             if not written <= keyed[frame]:
                 poses[frame].constrained_joints = sorted(backend.joint_map[role] for role in keyed[frame]
                                                          if role in backend.joint_map)
-    request = GenerationRequest(start, end, scene.render.fps / scene.render.fps_base,
-                                {frame: poses[frame] for frame in key_frames},
+    request = GenerationRequest(start, end, fps, {frame: poses[frame] for frame in key_frames},
                                 prompt=prompt if caps.prompt else "", seed=seed if caps.seed else None,
-                                origin=poses[start], segments=list(segments or []))
+                                origin=poses[start], segments=list(segments or []),
+                                context_before=motions.get("before"), context_after=motions.get("after"))
     backend.check_request(request)
     return request, scale[0], retargeter.errors
 
@@ -491,9 +498,11 @@ class IkSnapWriter:
     IK controls has a user key (its IK pose there is the user's). How far the user's IK pose is from the FK one on
     those frames (Rigify's IK chain is a little shorter) is blended from one to the next, so the IK motion doesn't
     jump there. The GENERATED keys of the IK controls in the range are removed when the writer is made.
+    offsets_range: (first, last) frames whose user IK keys the offsets are blended from (default: start to end);
+    wider for a single segment, so its offsets are blended as they were when the whole track was generated.
     step() until it returns True."""
 
-    def __init__(self, rig, limbs, start, end):
+    def __init__(self, rig, limbs, start, end, offsets_range=None):
         self.rig = rig
         self.limbs = limbs
         self.controls = [snap.ik_control for limb in limbs for snap in limb.ik_snap]
@@ -504,7 +513,8 @@ class IkSnapWriter:
         for limb in limbs:
             names = {s.ik_control for s in limb.ik_snap} | set(limb.ik_controls)
             keyed = set().union(*(keys[name] for name in names))
-            self.keyed[limb.name] = sorted(f for f in keyed if start <= f <= end)
+            low, high = offsets_range or (start, end)
+            self.keyed[limb.name] = sorted(f for f in keyed if min(low, start) <= f <= max(high, end))
             for frame in range(start, end + 1):
                 if frame not in keyed:
                     self.by_frame.setdefault(frame, []).append(limb)
@@ -587,12 +597,16 @@ class Chunk:
     """One request of a generation and the frames its result is written on.
     write_start / write_end: frames written. request_start: the request's first frame (its origin): the frame
     before write_start for a segment generated after another one, so it starts where that one ended.
-    segments: prompt segments generated in one pass by the backend ([] for one prompt)."""
+    segments: prompt segments generated in one pass by the backend ([] for one prompt).
+    context_before / context_after: (first, last) frames of the motion around it sent for the backend to continue
+    (a single segment regenerated), or None."""
 
-    def __init__(self, write_start, write_end, request_start, prompt="", seed=None, segments=None):
+    def __init__(self, write_start, write_end, request_start, prompt="", seed=None, segments=None,
+                 context_before=None, context_after=None):
         self.write_start, self.write_end, self.request_start = write_start, write_end, request_start
         self.prompt, self.seed = prompt, seed
         self.segments = list(segments or [])
+        self.context_before, self.context_after = context_before, context_after
 
 
 def generation_chunks(state, backend, start, end):
@@ -605,6 +619,44 @@ def generation_chunks(state, backend, start, end):
         return [Chunk(start, end, start, segments=track)]
     return [Chunk(s.start_frame, s.end_frame, s.start_frame - 1 if i > 0 else s.start_frame, s.prompt, s.seed)
             for i, s in enumerate(track)]
+
+
+def segment_chunk(state, backend, index, fps):
+    """The Chunk regenerating one prompt segment of a character (RTGTR_CharacterState), and notes about it.
+    With a backend continuing the motion around a range, a neighbour already generated is sent as context (as
+    many frames as the backend asks, within the neighbour): the segment joins it, the transition being the
+    backend's. A neighbour never generated is left out: the segment starts where the character stands on its first
+    frame, or ends freely. Otherwise the segment is generated from the previous segment's last frame (as in a track
+    generated one segment at a time), without transition."""
+    track = segment_track.read_track(state)
+    if not 0 <= index < len(track):
+        raise ValueError(f"No prompt segment {index + 1} on '{state.id_data.name}'.")
+    segment = track[index]
+    notes = []
+    if not backend.capabilities.motion_context:
+        notes.append(f"{backend.label} doesn't continue the motion around a segment: generated from the frame "
+                     "before it, without transition (the pose may jump at its boundaries)")
+        request_start = segment.start_frame - 1 if index > 0 else segment.start_frame
+        return Chunk(segment.start_frame, segment.end_frame, request_start, segment.prompt, segment.seed), notes
+    count = backend.context_frame_count(fps)
+    before = after = None
+    skipped = []
+    if index > 0:
+        if segment_track.segment_state(state.segments[index - 1]) != 'NEW':
+            n = min(count, track[index - 1].frame_count)
+            before = (segment.start_frame - n, segment.start_frame - 1)
+        else:
+            skipped.append(f"segment {index} (before)")
+    if index < len(track) - 1:
+        if segment_track.segment_state(state.segments[index + 1]) != 'NEW':
+            n = min(count, track[index + 1].frame_count)
+            after = (segment.end_frame + 1, segment.end_frame + n)
+        else:
+            skipped.append(f"segment {index + 2} (after)")
+    if skipped:
+        notes.append(f"Never generated, so not continued: {', '.join(skipped)}")
+    return Chunk(segment.start_frame, segment.end_frame, segment.start_frame, segment.prompt, segment.seed,
+                 context_before=before, context_after=after), notes
 
 
 class GenerationTask:
@@ -626,6 +678,8 @@ class GenerationTask:
         self.chunks = []  # the requests (Chunk), generated and written one after the other
         self.chunk_index = 0
         self.segment_count = 0  # prompt segments of the character (0: one prompt)
+        self.segment_index = None  # the prompt segment regenerated alone, or None for the whole generation
+        self.track_range = None  # (first, last) frames of the track, with a segment regenerated alone
         self._written = [0, 0]  # frames written and keys removed by the chunks already finished
         self.notes = []  # what was done to the rig besides the generated keys (FK snap...)
         self.writer = None
@@ -684,8 +738,11 @@ class GenerationTask:
             raise GenerationError(f"The character '{self.rig_name}' doesn't exist anymore.")
         return rig
 
-    def start(self, context, rig):
+    def start(self, context, rig, segment=None):
+        """segment: index of the prompt segment to regenerate alone (the rest of the track is left as it is), or
+        None for the whole generation"""
         self.rig_name = rig.name
+        self.segment_index = segment
         self.backend = active_backend(context)
         self.rig_profile = self._rig_profile(rig)
         # Generated keys edited since the last generation are user keys (the handler retypes them as soon as they
@@ -699,13 +756,28 @@ class GenerationTask:
         fps = scene.render.fps / scene.render.fps_base
         state = rig.retargetor
         self.segment_count = len(state.segments)
-        if self.segment_count:
+        if segment is not None:
+            if not self.segment_count:
+                raise ValueError(f"'{rig.name}' has no prompt segment to regenerate.")
+            chunk, notes = segment_chunk(state, self.backend, segment, fps)
+            self.notes += notes
+            self.track_range = (self.start_frame, self.end_frame)
+            self.start_frame, self.end_frame = chunk.write_start, chunk.write_end
+            all_keys = self.key_frames
+            self.key_frames = [f for f in all_keys if self.start_frame <= f <= self.end_frame]
+            # Without context, a segment after another one is generated from that one's last frame
+            from_before = chunk.context_before is not None or chunk.request_start < chunk.write_start
+            problem = self.backend.segment_problem(segment_track.read_track(state)[segment], fps, all_keys,
+                                                   before=from_before, after=chunk.context_after is not None)
+            self.chunks = [chunk]
+        elif self.segment_count:
             problem = self.backend.segments_problem(segment_track.read_track(state), fps, self.key_frames)
         else:
             problem = self.backend.range_problem(self.start_frame, self.end_frame, fps, len(self.key_frames))
         if problem:
             raise ValueError(problem)
-        self.chunks = generation_chunks(state, self.backend, self.start_frame, self.end_frame)
+        if segment is None:
+            self.chunks = generation_chunks(state, self.backend, self.start_frame, self.end_frame)
         self.chunk_index = 0
         snaps, in_ik = limbs_in_ik(rig, self.rig_profile, self.start_frame, self.end_frame, self.key_frames)
         self.partial = self.backend.capabilities.partial_poses
@@ -767,7 +839,7 @@ class GenerationTask:
         keyed = keyed_roles(rig, self.rig_profile, key_frames) if self.partial else None
         request, self.translation_scale, errors = build_request(
             context, rig, model, self.backend, self.rig_profile, chunk.request_start, chunk.write_end, key_frames,
-            chunk.prompt, chunk.seed, keyed, chunk.segments)
+            chunk.prompt, chunk.seed, keyed, chunk.segments, chunk.context_before, chunk.context_after)
         self.request = request
         self.timings["key poses"] = self.timings.get("key poses", 0.0) + time.perf_counter() - start
         self.errors |= errors
@@ -817,7 +889,8 @@ class GenerationTask:
                                        chunk.write_start, chunk.write_end, self.translation_scale)
             self.ik_writer = None
             if self.synced:
-                self.ik_writer = IkSnapWriter(rig, self.synced, chunk.write_start, chunk.write_end)
+                self.ik_writer = IkSnapWriter(rig, self.synced, chunk.write_start, chunk.write_end,
+                                              self.track_range)
             self.stage = WRITING
             return False
         return True
@@ -852,7 +925,7 @@ class GenerationTask:
             # fix_quaternion_signs may have flipped keys the add-on made (same rotations): still the add-on's
             generated_keys.record_added(rig, self.keys_before)
         if self.segment_count:
-            segment_track.mark_generated(rig.retargetor)
+            segment_track.mark_generated(rig.retargetor, self.segment_index)
         self.result = tuple(self._written)
         self.stage = FINISHED
         return True
@@ -869,10 +942,10 @@ class GenerationTask:
             restore_switches(rig, self.switches, context.view_layer)
             self.switches = []
 
-    def run(self, context, rig, timeout=None):
+    def run(self, context, rig, timeout=None, segment=None):
         """Run the whole generation, blocking (scripts, tests). Returns False if it was cancelled."""
         with generated_keys.suspended():
-            self.start(context, rig)
+            self.start(context, rig, segment)
             limit = timeout or (self.backend.load_timeout + self.backend.generate_timeout)
             begin = time.perf_counter()
             while not self.update(context, budget=1.0):
