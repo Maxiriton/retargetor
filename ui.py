@@ -436,9 +436,12 @@ class RETARGETOR_PT_GeneratePanel(Panel):
         if task is not None:
             draw_progress(layout, task)
         else:
-            row = layout.row()
-            row.enabled = not problem
-            row.operator("retargetor.generate_inbetweens", icon='ANIM')
+            if len(state.segments) == 0:
+                # The first generation: it becomes prompt segment 1. With segments, the segment's own button
+                # generates it, and the timeline's Generate the whole track
+                row = layout.row()
+                row.enabled = not problem
+                row.operator("retargetor.generate_inbetweens", text="Generate", icon='ANIM')
             layout.operator("retargetor.clear_generated_keys", icon='TRASH')
 
 
@@ -566,7 +569,7 @@ class RTGTR_MT_EditorMenu(Menu):
             layout.label(text="Choose the character in the Retarget panel", icon='INFO')
         else:
             layout.label(text=f"Character: {rig.name}", icon='ARMATURE_DATA')
-        layout.operator("retargetor.generate_inbetweens", icon='ANIM')
+        layout.operator("retargetor.generate_inbetweens", text="Generate Whole Track", icon='ANIM')
         layout.separator()
         if rig is not None and len(state.segments) > 0:
             from . import segment_track

@@ -186,7 +186,7 @@ Findings:
 - **FBX imports and rigs facing +Y**: an FBX character has its bones Y-up under an object turned 90°; the model's skeleton, placed like the object, would lie down for Kimodo. SMPL faces +Y. The model now stands like the rig's body at rest (its frame rounded to the armature's axes; identity on Rigify, so its results are unchanged).
 - **CloudRig's spine is in IK by default**: the preset treats it as a limb (switched to FK while generating), without IK snap, so it stays in FK after a generation, and the report says so.
 - **A file can exclude a character's collection** from the view layer: its bones aren't evaluated and the check says so.
-- After the user's test, outside the phase's items: a segment never generated says "Generate", not "Regenerate"; a generation made without segments becomes prompt segment 1, shown in the timeline (a track of one segment is generated as one prompt); the rig check starts from the rig's rest pose (an IK arm stretched a metre on the frame was taken for a broken limb).
+- After the user's test, outside the phase's items: the Generate panel's "Generate In-betweens" button is gone (with segments, the segment's button; without, "Generate", which makes segment 1; the whole track from the timeline); a segment never generated says "Generate", not "Regenerate"; a generation made without segments becomes prompt segment 1, shown in the timeline (a track of one segment is generated as one prompt); the rig check starts from the rig's rest pose (an IK arm stretched a metre on the frame was taken for a broken limb).
 - Mike's check takes 1 s, Storm's 3 s (1102 bones), a skeleton's 0.1 s.
 
 ### Phase 7: models setup and a second model
