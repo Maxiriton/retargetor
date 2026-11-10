@@ -55,7 +55,8 @@ def torch_packages(machine):
 
 def requirements(machine, model=joints.DEFAULT_MODEL):
     model = model or joints.DEFAULT_MODEL
-    packages = [torch_packages(machine)]
+    torch = torch_packages(machine)
+    packages = [torch]
     wheel = MOTION_CORRECTION_WHEELS.get(machine.system) if machine.arch == "x86_64" else None
     if wheel is not None:
         url, digest = wheel
@@ -65,7 +66,10 @@ def requirements(machine, model=joints.DEFAULT_MODEL):
         "Kimodo",
         (f"kimodo @ {FORK_ARCHIVE}",
          # Imported by Kimodo without being declared by it (as the fork's own installer does)
-         "bitsandbytes>=0.46.1", "safetensors", "psutil"),
+         "bitsandbytes>=0.46.1", "safetensors", "psutil",
+         # The PyTorch build installed above stays (bitsandbytes would pull the latest one from PyPI, without CUDA
+         # on Windows): the CUDA build's version (2.5.1+cu121) matches the pin
+         ) + torch.requirements,
         # Its post-processing module comes from the wheel above, not built from source (that needs a compiler)
         env=(("SKIP_MOTION_CORRECTION_IN_SETUP", "1"),)))
     return Requirements(

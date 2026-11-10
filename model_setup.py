@@ -279,12 +279,12 @@ class RTGTR_OT_ModelInstall(Operator):
 
     backend_id: StringProperty(options={'SKIP_SAVE', 'HIDDEN'})
     repair: BoolProperty(name="Repair", default=False, options={'SKIP_SAVE'},
-                         description="Make a new environment, reinstall every package and complete the weights")
+                         description="Make a new environment, install every package again and complete the weights")
 
     @classmethod
     def description(cls, _context, properties):
         if properties.repair:
-            return "Repair the install: a new environment, every package reinstalled, the weights completed"
+            return "Repair the install: a new environment, every package installed again, the weights completed"
         return cls.__doc__
 
     def invoke(self, context, _event):

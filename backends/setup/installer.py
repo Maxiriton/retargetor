@@ -3,7 +3,7 @@
 Each step done is recorded in the backend's state file (install.json) with the key of its declaration
 (spec.step_key): an install stopped halfway (cancelled, failed, Blender closed) resumes where it stopped, and a step
 whose declaration changed (a new version pinned) is done again. Repair redoes everything: a new environment, every
-package reinstalled, the weights completed. Every command's output goes to the backend's log (install.log).
+package installed again, the weights completed. Every command's output goes to the backend's log (install.log).
 
 The add-on reads the Installer's fields from a timer (state, fraction, message, detail, error, problem); nothing
 blocks Blender. wait() blocks, for scripts and tests.
@@ -266,6 +266,8 @@ class Installer:
             "PYTHONUTF8": "1",
             "HF_HUB_DISABLE_PROGRESS_BARS": "1",
             "HF_HUB_DISABLE_TELEMETRY": "1",
+            # Windows without Developer Mode has no symlinks: the cache copies files, which is fine
+            "HF_HUB_DISABLE_SYMLINKS_WARNING": "1",
         })
         # The environment's own variables, never the ones of Blender's Python
         for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
@@ -349,8 +351,8 @@ class Installer:
             argv += ["--index-strategy", "unsafe-best-match"]
         if packages.no_deps:
             argv.append("--no-deps")
-        if self.repair:
-            argv.append("--reinstall")
+        # No --reinstall when repairing: the environment is new, and a reinstall would take PyTorch again from the
+        # step's own index (PyPI's build has no CUDA on Windows)
         argv += list(packages.requirements)
         self.run_command(argv, extra_env=packages.env)
 
