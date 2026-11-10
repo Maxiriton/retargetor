@@ -50,6 +50,7 @@ class KimodoHandler:
         if self.model is not None:
             return
         context.progress(0.0, "Loading Kimodo")
+        demo_without_viewer()
         import torch
         from kimodo import load_model
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -139,6 +140,29 @@ class KimodoHandler:
             output["global_rot_mats"][0], output["posed_joints"][0][:, root_index], canonical, request, timing)
         context.send_frames(request.start_frame, request.fps, rotations, positions)
         print(f"Generated {num_frames} model frames, heading {canonical.heading:.3f} rad", file=sys.stderr)
+
+
+def demo_without_viewer():
+    """The fork's text encoder imports Kimodo's demo memory manager (kimodo.demo.memory_manager: psutil and torch
+    only). Imported the normal way, kimodo/demo/__init__.py would load the whole demo and its web viewer (viser),
+    which the add-on doesn't install: the package is registered bare, so only the memory manager loads."""
+    if "kimodo.demo" in sys.modules:
+        return
+    import importlib.machinery
+    import importlib.util
+    import types
+    spec = importlib.util.find_spec("kimodo")
+    if spec is None or not spec.origin:
+        return
+    folder = os.path.join(os.path.dirname(spec.origin), "demo")
+    if not os.path.isfile(os.path.join(folder, "memory_manager.py")):
+        return
+    package = types.ModuleType("kimodo.demo")
+    package.__spec__ = importlib.machinery.ModuleSpec("kimodo.demo", None, is_package=True)
+    package.__spec__.submodule_search_locations = [folder]
+    package.__path__ = [folder]
+    package.__package__ = "kimodo.demo"
+    sys.modules["kimodo.demo"] = package
 
 
 def sentence(prompt):

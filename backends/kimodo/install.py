@@ -13,9 +13,6 @@ PYTHON = "3.11"
 FORK = "https://github.com/Aero-Ex/kimodo"
 FORK_COMMIT = "3b45cc6d420136bfa6128e8be5e81e45521f2b7a"
 FORK_ARCHIVE = f"{FORK}/archive/{FORK_COMMIT}.zip"
-# NVIDIA's viser fork: the fork's text encoder imports Kimodo's demo (its memory manager), which imports viser. The
-# commit the fork's own installer took, and ARDY pins
-VISER_ARCHIVE = "https://github.com/nv-tlabs/kimodo-viser/archive/7c82ad8f8640bad9dff8ded5c5eee908eeb08f11.zip"
 
 # Aero-Ex's prebuilt post-processing module (release v1.0.0), for Python 3.11
 _WHEELS = f"{FORK}/releases/download/v1.0.0/"
@@ -69,7 +66,9 @@ def requirements(machine, model=joints.DEFAULT_MODEL):
         "Kimodo",
         (f"kimodo @ {FORK_ARCHIVE}",
          # Imported by Kimodo without being declared by it (as the fork's own installer does)
-         "bitsandbytes>=0.46.1", "safetensors", "psutil", f"viser @ {VISER_ARCHIVE}",
+         # psutil: the demo's memory manager, which the text encoder uses (the worker loads it without the demo and
+         # its web viewer, viser, which isn't installed)
+         "bitsandbytes>=0.46.1", "safetensors", "psutil",
          # The PyTorch build installed above stays (bitsandbytes would pull the latest one from PyPI, without CUDA
          # on Windows): the CUDA build's version (2.5.1+cu121) matches the pin
          ) + torch.requirements,
@@ -79,8 +78,8 @@ def requirements(machine, model=joints.DEFAULT_MODEL):
         python=PYTHON,
         packages=tuple(packages),
         weights=(model_weights(model), TEXT_ENCODER),
-        # What a generation imports, the text encoder's memory manager included (it pulls in Kimodo's demo)
-        imports=("torch", "kimodo", "transformers", "bitsandbytes", "kimodo.demo.memory_manager"),
+        # What a generation imports, psutil included (the text encoder's memory manager)
+        imports=("torch", "kimodo", "transformers", "bitsandbytes", "psutil"),
         optional_imports=(("motion_correction", "Kimodo's post-processing is off: key poses are not hit exactly."),),
         cuda=True,
         # Measured: 6.8 GB on an RTX 3090 (4-bit text encoder, 10 s of motion)
