@@ -127,7 +127,7 @@ The **Rig Setup** panel (same tab) describes how the **active armature** maps to
 - **Advanced** (sub-panel): per role, Use Translation and the offset mode. Arms and legs default to **Roll** (the direction of the bone is copied), the spine, neck, head and feet to **Offset** (the rotation from rest: a foot bone slopes differently from rig to rig, but every rig stands with its feet flat at rest).
 - The menu next to **Check Rig**: **Load Preset**, **Import Profile** / **Export Profile** (JSON, to reuse a profile on a similar rig), **Add Roles** (every role, empty).
 - A rig standing with its bones Y-up (an FBX import) or facing +Y (SMPL) is fine: the model's skeleton stands like the rig.
-- Not supported yet: limbs posed in IK only, with no FK control to write (some older hand-made rigs).
+- Not supported yet: **limbs posed in IK only**, whose bones only an IK constraint can pose, with no FK control to write and no IK/FK switch (some older hand-made rigs, such as the 2006 Proog of Elephants Dream: its legs, its feet hanging from the root). **Check Rig** says so. A chain whose IK constraints are turned off by their influence can be used in FK, but the add-on doesn't switch such constraints itself.
 
 ### Linked rigs and library overrides
 

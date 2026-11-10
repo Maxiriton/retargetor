@@ -394,17 +394,17 @@ def _dot(a, b):
 
 def sides_swapped(heads, tails):
     """Whether the bones named left are on the character's right, from {role id: head} and {role id: tail} of
-    the rest pose (any space): the feet point forward, so left = up x forward. True as soon as the arms or the
-    legs disagree; False when it can't be told."""
+    the rest pose (any space): the toes are in front of the feet, so left = up x forward. True as soon as the arms
+    or the legs disagree; False when it can't be told (no toes: a foot bone may point anywhere, Proog's IK foot
+    control points back)."""
     if "hips" not in heads or "head" not in heads:
         return False
     up = _sub(heads["head"], heads["hips"])
     forward = (0.0, 0.0, 0.0)
     for side in ("L", "R"):
-        foot = f"foot.{side}"
-        if foot in heads:
-            end = heads.get(f"toes.{side}", tails.get(foot))
-            forward = tuple(f + d for f, d in zip(forward, _sub(end, heads[foot])))
+        foot, toes = f"foot.{side}", f"toes.{side}"
+        if foot in heads and toes in heads:
+            forward = tuple(f + d for f, d in zip(forward, _sub(heads[toes], heads[foot])))
     if not any(forward):
         return False
     side = _cross(up, forward)

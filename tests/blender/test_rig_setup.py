@@ -102,6 +102,17 @@ def main():
     checks.check(any(p.subject == "forearm.L" and p.level == rig_check.ERROR for p in problems),
                  "a control driven by a constraint is an error")
     rig.pose.bones["mixamorig1:LeftForeArm"].constraints.remove(constraint)
+    # A limb posed by IK only (no FK control to write): named as such
+    target = bpy.data.objects.new("ik_target", None)
+    scene.collection.objects.link(target)
+    target.location = rig.matrix_world @ rig.pose.bones["mixamorig1:LeftHand"].head
+    constraint = rig.pose.bones["mixamorig1:LeftForeArm"].constraints.new('IK')
+    constraint.target, constraint.chain_count = target, 2
+    problems = rig_check.check(rig, profile.to_core(), view_layer)
+    checks.check(any(p.subject == "forearm.L" and "IK only" in p.message for p in problems),
+                 "a limb posed by IK only is named in the check")
+    rig.pose.bones["mixamorig1:LeftForeArm"].constraints.remove(constraint)
+    bpy.data.objects.remove(target)
     swapped = profile.to_core()
     left, right = swapped.binding("thigh.L"), swapped.binding("thigh.R")
     left.read_bone, right.read_bone = right.read_bone, left.read_bone

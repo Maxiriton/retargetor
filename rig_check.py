@@ -182,13 +182,26 @@ def _write_problems(rig_obj, rig_profile, view_layer, saved):
         view_layer.update()
         control_turn = control.matrix.to_quaternion() @ control_before.to_quaternion().inverted()
         read_turn = read.matrix.to_quaternion() @ read_before.to_quaternion().inverted()
-        if _turn(control_turn) < math.radians(1.0):
-            problems.append(Problem(ERROR, binding.role, f"{label}: the control '{control.name}' doesn't turn when "
-                                                         "written (a constraint drives it?)"))
+        # Where the control was asked to go: a constraint may hold it, or turn it only partly (an IK constraint
+        # leaves the twist free)
+        missed = _angle(control.matrix.to_quaternion(), (TEST_TURN @ control_before.to_3x3()).to_quaternion())
+        if missed > ANGLE_ERROR:
+            ik = next((c for c in control.constraints
+                       if getattr(c, "type", "") == 'IK' and not c.mute and c.influence > 0.0), None)
+            if ik is not None:
+                problems.append(Problem(ERROR, binding.role, f"{label}: '{control.name}' is posed by its IK constraint "
+                                                             f"'{ik.name}', with no FK control to write: limbs posed "
+                                                             "in IK only aren't supported yet"))
+            else:
+                problems.append(Problem(ERROR, binding.role, f"{label}: the control '{control.name}' doesn't turn "
+                                                             f"as written ({missed:.0f}° off: a constraint drives it?)"))
         elif _turn(read_turn) < math.radians(1.0):
             problems.append(Problem(ERROR, binding.role, f"{label}: turning '{control.name}' doesn't move "
                                                          f"'{read.name}' (wrong control, or the limb isn't in FK?)"))
         else:
+            if missed > ANGLE_WARNING:
+                problems.append(Problem(WARNING, binding.role, f"{label}: the control '{control.name}' turns "
+                                                               f"{missed:.1f}° away from what is written"))
             error = _angle(control_turn, read_turn)
             if error > ANGLE_WARNING:
                 level = ERROR if error > ANGLE_ERROR else WARNING
