@@ -1,7 +1,7 @@
 """Run every test: the plain-Python unit tests, then the headless Blender tests.
 
     python tests/run_tests.py [--blender <blender.exe>] [--spikes <folder with phase0/out and phase1/out>]
-                              [--kimodo-python <Kimodo venv python.exe>] [--gui]
+                              [--kimodo-python <Kimodo venv python.exe>] [--rigs <rigs.json>] [--gui]
 
 Blender 5.2+ is needed (default: the BLENDER environment variable, else the standard Windows install path).
 The unit tests run with Blender's own Python (it has numpy), found next to blender.exe.
@@ -12,6 +12,9 @@ conversions against Kimodo itself, then generations on the GPU (a few minutes).
 --gui also runs the tests needing Blender's interface (the prompt segments with the mouse): a Blender window
 opens for about a minute, with its own empty user folder (BLENDER_USER_RESOURCES), so your preferences can't be
 touched, and simulated events (the real mouse and keyboard are ignored meanwhile).
+--rigs: a JSON mapping the file keys of tests/fixtures/real_rigs.json to the rigs' files on this machine (not
+committed; default: the RETARGETOR_RIGS environment variable): each rig is set up, checked and generated on, with
+Kimodo too when --kimodo-python is given. Rigs whose file is missing are skipped.
 The migration test builds a legacy file with the add-on as it was before Phase 2 (commit LEGACY_COMMIT).
 """
 import argparse
@@ -105,6 +108,31 @@ def run_kimodo_tests(args, env, scratch, rig_file, ik_rig_file):
     return results
 
 
+def run_real_rigs(args, env):
+    """tests/blender/test_rigs.py on each rig of tests/fixtures/real_rigs.json present on this machine"""
+    import json
+    results = {}
+    with open(os.path.join(REPO, "tests", "fixtures", "real_rigs.json"), encoding="utf-8") as f:
+        manifest = json.load(f)["rigs"]
+    paths = {}
+    if args.rigs and os.path.exists(args.rigs):
+        with open(args.rigs, encoding="utf-8") as f:
+            paths = json.load(f)
+    for rig in manifest:
+        name = f"rig_{rig['object']}"
+        path = paths.get(rig["file"])
+        if not path or not os.path.exists(path):
+            print(f"{name}: SKIPPED, no file for '{rig['file']}' (--rigs)")
+            results[name] = None
+            continue
+        test_args = [rig["object"], rig["expect"]] + ([args.kimodo_python] if args.kimodo_python else [])
+        if rig.get("fbx"):
+            results[name] = run_blender(args.blender, "test_rigs.py", test_args + ["--fbx", path], env=env)
+        else:
+            results[name] = run_blender(args.blender, "test_rigs.py", test_args, blend=path, env=env)
+    return results
+
+
 def extract_legacy_addon(folder):
     archive = subprocess.run(["git", "-C", REPO, "archive", LEGACY_COMMIT, "--"] + LEGACY_FILES,
                              capture_output=True, check=True).stdout
@@ -119,6 +147,8 @@ def main():
     parser.add_argument("--blender", default=os.environ.get("BLENDER", DEFAULT_BLENDER))
     parser.add_argument("--spikes", default=os.environ.get("RETARGETOR_SPIKES", os.path.join(REPO, "spikes")))
     parser.add_argument("--kimodo-python", default=os.environ.get("RETARGETOR_KIMODO_PYTHON"))
+    parser.add_argument("--rigs", default=os.environ.get("RETARGETOR_RIGS"),
+                        help="JSON mapping the files of tests/fixtures/real_rigs.json to this machine's paths")
     parser.add_argument("--gui", action="store_true", help="also run the tests needing Blender's interface")
     args = parser.parse_args()
 
@@ -131,6 +161,7 @@ def main():
         results["segments"] = run_blender(args.blender, "test_segments.py", env=env)
         results["pose_io"] = run_blender(args.blender, "test_pose_io.py", env=env)
         results["skeleton_io"] = run_blender(args.blender, "test_skeleton_io.py", env=env)
+        results["rig_setup"] = run_blender(args.blender, "test_rig_setup.py", env=env)
         lib_dir = os.path.join(scratch, "library")
         os.makedirs(lib_dir)
         results["library_override"] = run_blender(args.blender, "test_library_override.py", [lib_dir], env=env)
@@ -142,6 +173,10 @@ def main():
         test_rig = os.path.join(rig_dir, "rig_keyposes.blend")
         if os.path.exists(test_rig):
             results["generate"] = run_blender(args.blender, "test_generate.py", blend=test_rig, env=env)
+            # Its hips control turned on the key poses: between torso (written) and ORG-spine (read)
+            results["rig_rigify"] = run_blender(args.blender, "test_rigs.py",
+                                                ["rig", "Rigify", "--pose", "hips"],
+                                                blend=test_rig, env=env)
             if args.gui:
                 results["segment_mouse"] = run_blender_gui(args.blender, "test_segment_mouse.py", test_rig, env,
                                                            scratch)
@@ -181,6 +216,8 @@ def main():
                         blend=os.path.join(spike_dir, "result.blend"))
             results[f"chain_{mode}"] = run_blender(args.blender, "test_chain.py", [mode, spike_dir, reference],
                                                    blend=os.path.join(phase1, rig_file), env=env)
+
+        results.update(run_real_rigs(args, env))
 
         if args.kimodo_python and os.path.exists(test_rig):
             results.update(run_kimodo_tests(args, env, scratch, test_rig,

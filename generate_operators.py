@@ -159,12 +159,12 @@ class GenerateBase:
 
 
 class RTGTR_OT_GenerateInbetweens(GenerateBase, Operator):
-    """Generate the character's motion with the active backend, from the first key pose to the last one, on its
-    custom range, or on its whole track of prompt segments. Key poses are the frames where a control of the rig
+    """Generate the character's motion with the active backend: its whole track of prompt segments, or without
+    segments its prompt from the first key pose to the last one or on its custom range (it becomes prompt segment 1). Key poses are the frames where a control of the rig
     profile has a key that isn't Generated; the result is written as Generated keys, never on a key pose. Esc
     cancels"""
     bl_idname = "retargetor.generate_inbetweens"
-    bl_label = "Generate In-betweens"
+    bl_label = "Generate"
     bl_options = {'REGISTER', 'UNDO'}
 
     def _segment(self, context):

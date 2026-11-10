@@ -10,12 +10,12 @@ from .properties import get_character
 
 
 def character_profile(rig):
-    """The rig profile of a character (core), the detected preset if it is empty, or None"""
-    from .profile_operators import detect_preset
+    """The rig profile of a character (core), the detected one if it is empty, or None"""
+    from .profile_operators import detect_profile
     rig_profile = rig.data.retargetor_profile.to_core()
     if rig_profile.roles:
         return rig_profile
-    detected = detect_preset(rig.data)
+    detected = detect_profile(rig.data)
     return detected[1] if detected else None
 
 

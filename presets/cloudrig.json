@@ -1,0 +1,407 @@
+{
+    "name": "CloudRig",
+    "format": "retargetor.rig_profile",
+    "version": 1,
+    "roles": [
+        {
+            "role": "hips",
+            "read_bone": "Spine1",
+            "write_bone": "TORSO-Spine",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": true,
+            "corrections": {}
+        },
+        {
+            "role": "spine",
+            "read_bone": "Spine2",
+            "write_bone": "FK-Spine2",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "chest",
+            "read_bone": "Spine3",
+            "write_bone": "FK-Spine3",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "upper_chest",
+            "read_bone": "Spine4",
+            "write_bone": "FK-Spine4",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "neck",
+            "read_bone": "Neck",
+            "write_bone": "FK-Neck",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "head",
+            "read_bone": "Head",
+            "write_bone": "FK-Head",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "shoulder.L",
+            "read_bone": "Shoulder.L",
+            "write_bone": "FK-Shoulder.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "upper_arm.L",
+            "read_bone": "UpperArm.L",
+            "write_bone": "FK-UpperArm.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "forearm.L",
+            "read_bone": "Forearm.L",
+            "write_bone": "FK-Forearm.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "hand.L",
+            "read_bone": "Wrist.L",
+            "write_bone": "FK-Wrist.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "shoulder.R",
+            "read_bone": "Shoulder.R",
+            "write_bone": "FK-Shoulder.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "upper_arm.R",
+            "read_bone": "UpperArm.R",
+            "write_bone": "FK-UpperArm.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "forearm.R",
+            "read_bone": "Forearm.R",
+            "write_bone": "FK-Forearm.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "hand.R",
+            "read_bone": "Wrist.R",
+            "write_bone": "FK-Wrist.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "thigh.L",
+            "read_bone": "Thigh.L",
+            "write_bone": "FK-Thigh.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "shin.L",
+            "read_bone": "Knee.L",
+            "write_bone": "FK-Knee.L",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "foot.L",
+            "read_bone": "Foot.L",
+            "write_bone": "FK-Foot.L",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "toes.L",
+            "read_bone": "Toes.L",
+            "write_bone": "FK-Toes.L",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "thigh.R",
+            "read_bone": "Thigh.R",
+            "write_bone": "FK-Thigh.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "shin.R",
+            "read_bone": "Knee.R",
+            "write_bone": "FK-Knee.R",
+            "offset_mode": "ROLL",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "foot.R",
+            "read_bone": "Foot.R",
+            "write_bone": "FK-Foot.R",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        },
+        {
+            "role": "toes.R",
+            "read_bone": "Toes.R",
+            "write_bone": "FK-Toes.R",
+            "offset_mode": "REST_OFFSET",
+            "use_translation": false,
+            "corrections": {}
+        }
+    ],
+    "limbs": [
+        {
+            "name": "spine",
+            "switch_bone": "Properties",
+            "switch_property": "Spine_ik",
+            "fk_value": 0.0,
+            "controls": [
+                [
+                    "FK-Spine2",
+                    "Spine2"
+                ],
+                [
+                    "FK-Spine3",
+                    "Spine3"
+                ],
+                [
+                    "FK-Spine4",
+                    "Spine4"
+                ]
+            ],
+            "ik_controls": [],
+            "ik_snap": []
+        },
+        {
+            "name": "arm.L",
+            "switch_bone": "Properties",
+            "switch_property": "ik_left_arm",
+            "fk_value": 0.0,
+            "controls": [
+                [
+                    "FK-UpperArm.L",
+                    "UpperArm.L"
+                ],
+                [
+                    "FK-Forearm.L",
+                    "Forearm.L"
+                ],
+                [
+                    "FK-Wrist.L",
+                    "Wrist.L"
+                ]
+            ],
+            "ik_controls": [
+                "IK-Wrist.L",
+                "POLE-Arm.L"
+            ],
+            "ik_snap": [
+                [
+                    "IK-Wrist.L",
+                    "Wrist.L",
+                    "FOLLOW"
+                ],
+                [
+                    "POLE-Arm.L",
+                    "Forearm.L",
+                    "POLE"
+                ]
+            ]
+        },
+        {
+            "name": "arm.R",
+            "switch_bone": "Properties",
+            "switch_property": "ik_right_arm",
+            "fk_value": 0.0,
+            "controls": [
+                [
+                    "FK-UpperArm.R",
+                    "UpperArm.R"
+                ],
+                [
+                    "FK-Forearm.R",
+                    "Forearm.R"
+                ],
+                [
+                    "FK-Wrist.R",
+                    "Wrist.R"
+                ]
+            ],
+            "ik_controls": [
+                "IK-Wrist.R",
+                "POLE-Arm.R"
+            ],
+            "ik_snap": [
+                [
+                    "IK-Wrist.R",
+                    "Wrist.R",
+                    "FOLLOW"
+                ],
+                [
+                    "POLE-Arm.R",
+                    "Forearm.R",
+                    "POLE"
+                ]
+            ]
+        },
+        {
+            "name": "leg.L",
+            "switch_bone": "Properties",
+            "switch_property": "ik_left_leg",
+            "fk_value": 0.0,
+            "controls": [
+                [
+                    "FK-Thigh.L",
+                    "Thigh.L"
+                ],
+                [
+                    "FK-Knee.L",
+                    "Knee.L"
+                ],
+                [
+                    "FK-Foot.L",
+                    "Foot.L"
+                ],
+                [
+                    "FK-Toes.L",
+                    "Toes.L"
+                ]
+            ],
+            "ik_controls": [
+                "IK-Foot.L",
+                "POLE-Leg.L",
+                "ROLL-M-Foot.L",
+                "RIK-Toes.L",
+                "RIK-Foot.L",
+                "FK-Toes.L"
+            ],
+            "ik_snap": [
+                [
+                    "ROLL-M-Foot.L",
+                    "",
+                    "REST"
+                ],
+                [
+                    "RIK-Foot.L",
+                    "",
+                    "REST"
+                ],
+                [
+                    "RIK-Toes.L",
+                    "",
+                    "REST"
+                ],
+                [
+                    "IK-Foot.L",
+                    "Foot.L",
+                    "FOLLOW"
+                ],
+                [
+                    "FK-Toes.L",
+                    "Toes.L",
+                    "FOLLOW"
+                ],
+                [
+                    "POLE-Leg.L",
+                    "Knee.L",
+                    "POLE"
+                ]
+            ]
+        },
+        {
+            "name": "leg.R",
+            "switch_bone": "Properties",
+            "switch_property": "ik_right_leg",
+            "fk_value": 0.0,
+            "controls": [
+                [
+                    "FK-Thigh.R",
+                    "Thigh.R"
+                ],
+                [
+                    "FK-Knee.R",
+                    "Knee.R"
+                ],
+                [
+                    "FK-Foot.R",
+                    "Foot.R"
+                ],
+                [
+                    "FK-Toes.R",
+                    "Toes.R"
+                ]
+            ],
+            "ik_controls": [
+                "IK-Foot.R",
+                "POLE-Leg.R",
+                "ROLL-M-Foot.R",
+                "RIK-Toes.R",
+                "RIK-Foot.R",
+                "FK-Toes.R"
+            ],
+            "ik_snap": [
+                [
+                    "ROLL-M-Foot.R",
+                    "",
+                    "REST"
+                ],
+                [
+                    "RIK-Foot.R",
+                    "",
+                    "REST"
+                ],
+                [
+                    "RIK-Toes.R",
+                    "",
+                    "REST"
+                ],
+                [
+                    "IK-Foot.R",
+                    "Foot.R",
+                    "FOLLOW"
+                ],
+                [
+                    "FK-Toes.R",
+                    "Toes.R",
+                    "FOLLOW"
+                ],
+                [
+                    "POLE-Leg.R",
+                    "Knee.R",
+                    "POLE"
+                ]
+            ]
+        }
+    ]
+}
