@@ -162,6 +162,11 @@ def main():
         results["pose_io"] = run_blender(args.blender, "test_pose_io.py", env=env)
         results["skeleton_io"] = run_blender(args.blender, "test_skeleton_io.py", env=env)
         results["rig_setup"] = run_blender(args.blender, "test_rig_setup.py", env=env)
+        setup_dir = os.path.join(scratch, "model_setup")
+        os.makedirs(setup_dir)
+        results["model_setup"] = run_blender(args.blender, "test_model_setup.py",
+                                             [setup_dir] + ([args.kimodo_python] if args.kimodo_python else []),
+                                             env=env)
         lib_dir = os.path.join(scratch, "library")
         os.makedirs(lib_dir)
         results["library_override"] = run_blender(args.blender, "test_library_override.py", [lib_dir], env=env)

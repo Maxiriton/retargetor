@@ -1,21 +1,18 @@
 """What the add-on knows about the Kimodo backend, and its preferences."""
 import os
 
-import bpy
-from bpy.props import StringProperty
+from bpy.props import EnumProperty
 from bpy.types import PropertyGroup
 
 from ..base import Backend, Capabilities, worker_script
-from . import joints
+from . import install, joints
+
+_MODEL_ITEMS = [(name, name, f"nvidia/{name}") for name in install.MODEL_SIZES]
 
 
 class RTGTR_KimodoSettings(PropertyGroup):
-    python: StringProperty(
-        name="Kimodo Python", subtype='FILE_PATH',
-        description="Python executable of the virtual environment where Kimodo is installed "
-                    "(for example kimodo-venv/Scripts/python.exe)")
-    model: StringProperty(name="Model", default=joints.DEFAULT_MODEL,
-                          description="Kimodo model to load (its weights must be downloaded already)")
+    model: EnumProperty(name="Model", items=_MODEL_ITEMS, default=joints.DEFAULT_MODEL,
+                        description="Kimodo model to load (its weights are downloaded by the install)")
 
 
 class KimodoBackend(Backend):
@@ -35,21 +32,22 @@ class KimodoBackend(Backend):
         return RTGTR_KimodoSettings
 
     def draw_settings(self, layout, settings):
-        layout.prop(settings, "python")
         layout.prop(settings, "model")
 
-    def worker_command(self, settings):
-        python = bpy.path.abspath(settings.python) if settings is not None else ""
-        if not python:
-            raise ValueError("Set the Python executable of the Kimodo environment in the add-on preferences.")
-        if not os.path.isfile(python):
+    def requirements(self, machine, settings):
+        return install.requirements(machine, settings.model if settings is not None else None)
+
+    def worker_command(self, python, settings, layout):
+        if not python or not os.path.isfile(python):
             raise ValueError(f"The Kimodo Python executable doesn't exist: {python}")
-        model = settings.model or joints.DEFAULT_MODEL
+        model = (settings.model if settings is not None else "") or joints.DEFAULT_MODEL
         env = {
-            # Never download anything: the weights must already be there
+            # Never download anything: the install downloaded the weights
             "HF_HUB_OFFLINE": "1",
             "TRANSFORMERS_OFFLINE": "1",
             # Use the local text encoder directly, without trying a text encoder server first
             "TEXT_ENCODER_MODE": "local",
         }
+        if layout is not None:
+            env["KIMODO_TEXT_ENCODER_DIR"] = layout.weights_dir(install.TEXT_ENCODER)
         return [python, "-I", "-u", worker_script(__file__), "--model", model], env

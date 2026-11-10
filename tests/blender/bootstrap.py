@@ -49,11 +49,16 @@ def register_addon():
     return package
 
 
-def set_backend(backend_id, developer=False, **settings):
-    """Choose the active backend in the add-on preferences, and set its settings"""
+def set_backend(backend_id, developer=False, python=None, **settings):
+    """Choose the active backend in the add-on preferences, and set its settings. python: the model's existing
+    environment (its Python executable), instead of one installed by the add-on."""
     prefs = bpy.context.preferences.addons["retargetor"].preferences
     prefs.developer = developer
     prefs.backend = backend_id
+    if python is not None:
+        setup = getattr(prefs, f"setup_{backend_id}")
+        setup.environment = 'EXISTING'
+        setup.python = python
     backend_settings = getattr(prefs, f"settings_{backend_id}", None)
     for name, value in settings.items():
         setattr(backend_settings, name, value)

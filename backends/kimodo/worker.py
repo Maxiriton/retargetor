@@ -56,6 +56,12 @@ class KimodoHandler:
         if device == "cpu":
             print("No CUDA device: Kimodo runs on the CPU, very slowly.", file=sys.stderr)
         self.model = load_model(self.model_name, device=device, default_family="Kimodo")
+        # The fork's text encoder loads its weights on first use, from a folder baked into its source by its own
+        # installer: point it to the folder the add-on downloaded them to
+        folder = os.environ.get("KIMODO_TEXT_ENCODER_DIR", "")
+        encoder = getattr(self.model, "text_encoder", None)
+        if folder and os.path.isdir(folder) and hasattr(encoder, "custom_dir"):
+            encoder.custom_dir = folder
         if abs(float(self.model.fps) - joints.MODEL_FPS) > 1e-6:
             raise RuntimeError(f"The model runs at {self.model.fps} fps, the backend expects {joints.MODEL_FPS}.")
 

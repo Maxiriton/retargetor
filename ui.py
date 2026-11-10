@@ -398,9 +398,15 @@ class RETARGETOR_PT_GeneratePanel(Panel):
         props = row.operator("preferences.addon_show", text="", icon='PREFERENCES')
         props.module = ADDON_ID
 
+        from .model_setup import setup_problem
+        problem = setup_problem(context, backend)
         label, icon, start, stop, error = worker_status(backend)
         row = layout.row(align=True)
-        row.label(text=label, icon=icon)
+        if problem:
+            row.label(text=f"{problem}: see the add-on's preferences (Models)", icon='ERROR')
+            start = ""
+        else:
+            row.label(text=label, icon=icon)
         if start:
             row.operator("retargetor.backend_start", text=start, icon='PLAY')
         if stop:
@@ -613,11 +619,18 @@ def draw_editor_header(self, context):
     if task is not None:
         draw_progress(layout, task, width=12)
         return
+    from .model_setup import setup_problem
+    problem = setup_problem(context, backend)
     label, icon, start, _stop, error = worker_status(backend)
     row = layout.row(align=True)
-    row.label(text=backend.label, icon='ERROR' if error else icon)
-    if start:
-        row.operator("retargetor.backend_start", text="", icon='PLAY')
+    if problem:
+        row.label(text=f"{backend.label}: {problem}", icon='ERROR' if problem != "Installing" else 'SORTTIME')
+        props = row.operator("preferences.addon_show", text="", icon='PREFERENCES')
+        props.module = ADDON_ID
+    else:
+        row.label(text=backend.label, icon='ERROR' if error else icon)
+        if start:
+            row.operator("retargetor.backend_start", text="", icon='PLAY')
     layout.operator("retargetor.generate_inbetweens", text="Generate", icon='ANIM')
 
 

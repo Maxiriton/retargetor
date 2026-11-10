@@ -21,7 +21,7 @@ from .core.retarget.fk_snap import ik_offsets, key_ik_controls, set_limbs_fk, sn
 from .core.retarget.snap import Retargeter, compute_translation_scale
 from .core.skeleton import Skeleton
 from .core.skeleton_io import armature_backend, armature_skeleton, build_armature
-from .preferences import active_backend, backend_settings
+from .preferences import active_backend
 
 GENERATED = 'GENERATED'
 # Value of the GENERATED item of Keyframe.type, for foreach_get
@@ -817,7 +817,8 @@ class GenerationTask:
             snaps = {frame: [limb for limb in limbs if limb_keyed(limb, self.rig_profile, keyed[frame])]
                      for frame, limbs in snaps.items()}
             snaps = {frame: limbs for frame, limbs in snaps.items() if limbs}
-        self.worker = registry.worker_for(self.backend, backend_settings(context, self.backend))
+        from . import model_setup
+        self.worker = model_setup.worker_for(context, self.backend)
         if in_ik:
             # Before anything else changes the rig: the generated motion is written to the FK controls
             self.switches = save_switches(rig, in_ik)

@@ -29,6 +29,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from . import preferences
+from . import model_setup
 from . import properties
 from . import migration
 from . import ui
@@ -89,6 +90,7 @@ def check_bone_selection_handler(scene):
 
 addon_modules = (
     preferences,
+    model_setup,
     properties,
     migration,
     ui,
