@@ -51,11 +51,15 @@ def register_addon():
 
 def set_backend(backend_id, developer=False, python=None, **settings):
     """Choose the active backend in the add-on preferences, and set its settings. python: the model's existing
-    environment (its Python executable), instead of one installed by the add-on."""
+    environment (its Python executable), instead of one installed by the add-on; "managed": the one the add-on
+    installed, in the models' folder given by the RETARGETOR_MODELS_FOLDER environment variable (else the default)."""
     prefs = bpy.context.preferences.addons["retargetor"].preferences
     prefs.developer = developer
     prefs.backend = backend_id
-    if python is not None:
+    if python == "managed":
+        getattr(prefs, f"setup_{backend_id}").environment = 'MANAGED'
+        prefs.models_folder = os.environ.get("RETARGETOR_MODELS_FOLDER", "")
+    elif python is not None:
         setup = getattr(prefs, f"setup_{backend_id}")
         setup.environment = 'EXISTING'
         setup.python = python

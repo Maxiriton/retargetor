@@ -94,6 +94,22 @@ def main(scratch, kimodo_python=None):
             print(f"    {item.level:8} {item.label}: {item.message}")
         checks.check(setup_checks.ready(run.items), "the existing Kimodo environment is ready")
         checks.check(draw(model_setup.draw_models, context, prefs) == [], "the Models section draws a check")
+
+    installed = os.environ.get("RETARGETOR_MODELS_FOLDER")
+    if installed:
+        # Kimodo as the add-on installed it
+        setup.environment = 'MANAGED'
+        prefs.models_folder = installed
+        checks.check(model_setup.setup_problem(context, kimodo) == "", "the installed Kimodo is found")
+        layout = model_setup.layout_for(context, kimodo)
+        worker = model_setup.worker_for(context, kimodo)
+        checks.check(os.path.normcase(worker.env["KIMODO_TEXT_ENCODER_DIR"])
+                     == os.path.normcase(os.path.join(layout.backend_dir, "llm2vec-model")),
+                     "the installed Kimodo's worker gets its text encoder")
+        run = model_setup.start_check(context, kimodo).wait(300)
+        for item in run.items:
+            print(f"    {item.level:8} {item.label}: {item.message}")
+        checks.check(setup_checks.ready(run.items), "the installed Kimodo is ready")
     checks.finish()
 
 

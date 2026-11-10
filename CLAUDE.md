@@ -70,7 +70,7 @@ A backend is a folder in `backends/` with a `Backend` subclass (`backend.py`) an
 - Live inspection goes through the Blender MCP connector; it needs Blender running with the MCP add-on server started.
 - Setting `pose_bone.matrix` ignores the bone's own constraints (Auto-Rig Pro's IK controls have Child Of constraints, CloudRig's FK toe an Armature one): `fk_snap` places such controls again through them.
 - Machine-specific paths (Kimodo venv, test files, real rigs) are in `CLAUDE.local.md`, which is not committed.
-- `test_model_setup.py` uses the Kimodo venv as an existing environment when `--kimodo-python` is given. The install itself is tested with fake steps (`tests/unit/test_setup.py`); a real install downloads GB: ask the user first, and point `models_folder` and `HF_HOME` to a scratch folder for a throwaway one.
+- `test_model_setup.py` uses the Kimodo venv as an existing environment when `--kimodo-python` is given; `--models-folder` (Kimodo installed by the add-on there) checks it and generates with it. Processes started from the Claude desktop app see `%LOCALAPPDATA%` redirected to the app's package folder: never install there for a test (Blender can't see it), use another folder. The install itself is tested with fake steps (`tests/unit/test_setup.py`); a real install downloads GB: ask the user first, and point `models_folder` and `HF_HOME` to a scratch folder for a throwaway one.
 
 ## Git
 
