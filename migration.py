@@ -1,13 +1,16 @@
 # type: ignore
-"""Move setups saved by older versions in scene.retarget_* onto the target armature object.
-
-Older versions stored one setup per scene. The properties are no longer registered, but their values are still
-in the file, in the scene's system properties. On file load, each scene's setup is copied into
-target_object.retargetor (unless that object already has a bone list), then removed from the scene.
+"""Bring what older versions saved up to date, on file load:
+- setups saved in scene.retarget_*, moved onto the target armature object. Older versions stored one setup per
+  scene. The properties are no longer registered, but their values are still in the file, in the scene's system
+  properties. Each scene's setup is copied into target_object.retargetor (unless that object already has a bone
+  list), then removed from the scene.
+- rig profiles recording a preset by its old name ("Auto-Rig Pro (FK controls)"), given its current one. Linked
+  armatures keep it: the panels show the current name anyway.
 """
 import bpy
 from bpy.app.handlers import persistent
 
+from .profile_operators import RENAMED_PRESETS
 from .properties import suspended_target_update
 
 LEGACY_PROPERTIES = (
@@ -84,14 +87,28 @@ def migrate_scene(scene):
     return f"Scene '{scene.name}': setup of {len(rows)} bones moved to the object '{target.name}'."
 
 
+def rename_presets():
+    """The rig profiles of the file's own armatures recording a preset by its old name: given its current one.
+    Returns a message per armature."""
+    messages = []
+    for armature in bpy.data.armatures:
+        profile = getattr(armature, "retargetor_profile", None)
+        if armature.library is not None or profile is None or profile.source not in RENAMED_PRESETS:
+            continue
+        old = profile.source
+        profile.source = RENAMED_PRESETS[old]
+        messages.append(f"Armature '{armature.name}': preset '{old}' is now called '{profile.source}'.")
+    return messages
+
+
 def migrate_all():
-    """Migrate every scene of the file. Returns the list of messages."""
+    """Migrate every scene of the file, then the rig profiles' preset names. Returns the list of messages."""
     messages = []
     for scene in bpy.data.scenes:
         message = migrate_scene(scene)
         if message:
             messages.append(message)
-    return messages
+    return messages + rename_presets()
 
 
 @persistent

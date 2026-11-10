@@ -18,7 +18,7 @@ Retargetor is a Blender extension (Blender 5.2+) that retargets animation betwee
 |---|---|
 | `__init__.py` | Entry point, bone selection handler |
 | `properties.py` | Stored data: rig profile on `Armature.retargetor_profile`, character state on `Object.retargetor` (prompt, seed, custom range, prompt segments), `Scene.retargetor_target` (which character the panel edits) |
-| `migration.py` | `load_post` handler moving the old `scene.retarget_*` setups onto the target object |
+| `migration.py` | `load_post` handler moving the old `scene.retarget_*` setups onto the target object, and giving the presets' old names (`RENAMED_PRESETS`) their current one |
 | `setup_operators.py` | Bone list setup, translation scale, JSON import/export, corrections |
 | `retarget_operators.py` | Snapping and baking operators |
 | `profile_operators.py` | Rig profile: presets (fitted: optional roles whose bones are missing left out), skeleton detection (`detect_profile`: preset, else `core.rig_detect`; cached per armature), Detect / Assign / Select / Clear a role, Check Rig (`checked`: one check per profile, run by Generate), JSON, Snap FK to IK |
