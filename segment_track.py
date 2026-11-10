@@ -136,6 +136,11 @@ def segment_state(item):
     return 'GENERATED' if item.generated == generated_signature(item) else 'MODIFIED'
 
 
+def generate_verb(item):
+    """"Generate" for a segment never generated, "Regenerate" otherwise (the buttons' text)"""
+    return "Generate" if item is None or segment_state(item) == 'NEW' else "Regenerate"
+
+
 def mark_generated(state, index=None):
     """After a generation: every segment is up to date, or only the one regenerated alone (index)"""
     for i, item in enumerate(state.segments):

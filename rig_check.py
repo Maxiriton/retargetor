@@ -2,7 +2,7 @@
 
 - profile_problems(): from the profile and the armature alone (bones that don't exist, required roles not mapped,
   read bones out of order, a control written by two roles...).
-- control_problems(): moves the rig and measures. Each write control is turned (and the hips moved): its read bone
+- control_problems(): moves the rig and measures, from its rest pose. Each write control is turned (and the hips moved): its read bone
   must turn with it, or the generated motion won't reach the rig. Each limb with an IK snap is posed in FK, its IK
   controls snapped and the limb switched to IK: its bones must stay where they were. Then its FK controls are
   snapped back to that IK pose. The rig's pose and switches are put back afterwards; nothing is keyed.
@@ -123,7 +123,9 @@ def _angle(a, b):
 
 
 class _SavedPose:
-    """The rig's pose (every bone's basis) and its switches, put back on exit"""
+    """The rig's pose (every bone's basis) and its switches, put back on exit. Meanwhile the rig is at rest: the
+    check is about the rig, not about the pose of the frame (an IK arm stretched a metre, its hand left behind,
+    can't be matched in FK)"""
     def __init__(self, rig_obj, limbs, view_layer):
         self.rig, self.view_layer = rig_obj, view_layer
         self.limbs = [limb for limb in limbs if limb.switch_bone and limb.switch_property]
@@ -135,14 +137,18 @@ class _SavedPose:
             pb = self.rig.pose.bones.get(limb.switch_bone)
             if pb is not None and limb.switch_property in pb:
                 self.switches[(limb.switch_bone, limb.switch_property)] = pb[limb.switch_property]
+        self.restore_basis()
+        self.view_layer.update()
         return self
 
     def restore_basis(self, names=None):
+        """Back to rest, for these bones (all of them by default)"""
         for name in names if names is not None else self.basis:
-            self.rig.pose.bones[name].matrix_basis = self.basis[name]
+            self.rig.pose.bones[name].matrix_basis = Matrix.Identity(4)
 
     def __exit__(self, *exc):
-        self.restore_basis()
+        for name, basis in self.basis.items():
+            self.rig.pose.bones[name].matrix_basis = basis
         for (bone, prop), value in self.switches.items():
             self.rig.pose.bones[bone][prop] = value
         self.rig.update_tag()
@@ -299,6 +305,9 @@ def check(rig_obj, rig_profile, view_layer):
     if rig_obj.name not in view_layer.objects:
         problems.append(Problem(ERROR, "", f"'{rig_obj.name}' is not in the view layer (its collection is excluded): "
                                            "its controls can't be checked"))
+    elif rig_obj.data.pose_position == 'REST':
+        problems.append(Problem(ERROR, "", f"'{rig_obj.name}' shows its Rest Position: switch it to Pose Position "
+                                           "(Armature properties)"))
     if not any(p.level == ERROR for p in problems):
         problems += control_problems(rig_obj, rig_profile, view_layer)
     return _sorted(problems)

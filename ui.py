@@ -520,7 +520,8 @@ def draw_segments(context, layout, rig, state, backend):
         label = state_label.get(segment_track.segment_state(item))
         if label:
             layout.label(text=label, icon='INFO')
-        layout.operator("retargetor.regenerate_segment", icon='FILE_REFRESH')
+        layout.operator("retargetor.regenerate_segment", text=f"{segment_track.generate_verb(item)} Segment",
+                        icon='FILE_REFRESH')
 
     box = layout.box()
     scene = context.scene
@@ -568,7 +569,9 @@ class RTGTR_MT_EditorMenu(Menu):
         layout.operator("retargetor.generate_inbetweens", icon='ANIM')
         layout.separator()
         if rig is not None and len(state.segments) > 0:
-            layout.operator("retargetor.regenerate_segment", text="Regenerate Active Segment", icon='FILE_REFRESH')
+            from . import segment_track
+            verb = segment_track.generate_verb(segment_track.active_segment(state))
+            layout.operator("retargetor.regenerate_segment", text=f"{verb} Active Segment", icon='FILE_REFRESH')
             props = layout.operator("retargetor.segment_edit", text="Edit Active Segment...", icon='GREASEPENCIL')
             props.character, props.index = rig.name, state.segments_active_index
         layout.operator("retargetor.segment_add", icon='ADD')
