@@ -30,7 +30,7 @@ It can also **generate in-betweens**: pose your own rig at a few key frames, and
 ## Requirements
 
 - Blender **5.2** or newer.
-- To generate with Kimodo: a working install of NVIDIA Kimodo in its own Python environment, with the model weights already downloaded, and an NVIDIA GPU (about 7 GB of video memory). The add-on never downloads anything.
+- To generate with Kimodo: an NVIDIA GPU (about 7 GB of video memory) and about 12 GB of disk. The add-on installs Kimodo itself (see [Models](#models)); Blender's **Allow Online Access** (Preferences > System > Network) must be on for the install.
 
 ## Installation
 
@@ -169,12 +169,17 @@ A character can follow several prompts, one after the other: "walks forward" for
 - **Generate** in the timeline's header (or **Generate Whole Track** in the Retargetor menu and the segment's menu) then generates the whole track; the Generate panel's button generates the active segment. Kimodo generates the segments one after the other in one pass, each one starting from the end of the previous one (its first 5 model frames, 0.17 s, follow it): the transitions are the model's. Each segment lasts 0.5 s at least and 10 s at most, but the track can be longer than 10 s. A model that can't chain prompts generates the segments one after the other, each one starting where the previous one ended, without transition.
 - **Regenerate Segment** (the segment's menu, its popup, the Retargetor menu, the Generate panel) generates one segment again, with its own prompt and seed, and leaves the rest of the track as it is: only the segment's frames get new Generated keys, your keys stay, one undo step. The motion around it is the model's to join: Kimodo is given the 5 model frames (0.17 s) on each side and generates the segment from the end of the one before to the start of the one after, like its own transitions, so there is no jump at its boundaries. A neighbour that was never generated (hatched, "not generated yet") isn't joined: the segment starts where the character stands on its first frame, or ends freely; generate that neighbour afterwards, or the whole track. A model that can't continue a motion generates the segment from the last frame of the one before, without transition (the report says so).
 
-### Preferences
+### Models
 
-**Edit > Preferences > Add-ons > Retargetor**:
+**Edit > Preferences > Add-ons > Retargetor** lists the motion models, each with what it supports (text prompt, key poses, prompt segments, longest motion...):
 
-- **Backend**: the motion model. **Kimodo** for now.
-- **Kimodo Python**: the Python executable of the environment where Kimodo is installed (for example `kimodo-venv\Scripts\python.exe`). **Model**: the Kimodo model to load (`Kimodo-SOMA-RP-v1.1` by default).
+- **Backend** (or **Use** on a model): the model generating the motion. One model is loaded on the GPU at a time: choosing another one stops the previous one.
+- **Install** sets the model up by itself, after showing what it downloads, from where, and the licences: its own Python and environment (with [uv](https://github.com/astral-sh/uv), downloaded once), its packages (the right PyTorch build for your GPU) and its weights. It runs in the background with its progress; **Cancel** stops it, and **Resume Install** goes on where it stopped (a failure too). **Repair** makes the environment again and completes the weights. The folder and log buttons open the model's folder and its install log; the bin removes the model (its environment and the weights installed with it; its weights in the Hugging Face cache too if you tick it, unless another model needs them).
+- **Models Folder**: where the environments go. Empty: `%LOCALAPPDATA%\Retargetor` on Windows, `~/.local/share/retargetor` on Linux, `~/Library/Application Support/Retargetor` on macOS. Weights from Hugging Face go to its usual cache (`~/.cache/huggingface`), shared with your other tools: weights already there aren't downloaded again.
+- **Existing Environment**: use a Python environment where the model is installed already (its Python executable, for example `kimodo-venv\Scripts\python.exe`), instead of installing it.
+- **Check Setup** says what is ready and what isn't, each problem with its fix: the environment, the packages, the GPU (PyTorch can use it, enough video memory), the weights. Loading the model itself is the **Start** / **Load** button. The animation editors' headers and the Generate panel say when the active model isn't set up.
+- **Gated weights**: some models need weights you must ask access to on Hugging Face (Meta's Llama 3, for example). The check says which, **Request Access** opens its page, and **Sign In** opens a terminal running Hugging Face's own sign-in (from the browser, or with a token you paste there). The add-on never asks for, reads, stores or sends your token: Hugging Face's library uses your sign-in by itself. Kimodo needs none.
+- **Kimodo** is installed from Aero-Ex's fork (github.com/Aero-Ex/kimodo), which runs on Windows without a compiler and comes with a 4-bit text encoder (about 5 GB of video memory instead of about 17, no gated weights); the model's weights come from NVIDIA. **Model**: the Kimodo model to load (`Kimodo-SOMA-RP-v1.1` by default).
 - **Developer**: also lists the test backends (an interpolation without any model, for tests).
 
 ## Good to know
@@ -198,12 +203,13 @@ A character can follow several prompts, one after the other: "walks forward" for
 | `profile_operators.py` | Rig profile: presets, detection, roles picked in the viewport, Check Rig, JSON, Snap FK to IK |
 | `rig_check.py` | The rig check: profile problems, then what the controls do |
 | `ui.py` | Sidebar panels and lists |
-| `preferences.py` | Add-on preferences: backend, its settings, developer option |
+| `preferences.py` | Add-on preferences: backend, models' folder, each model's environment and settings, developer option |
+| `model_setup.py` | The models' setup: install, check, remove, sign in, the Models section of the preferences |
 | `generation.py`, `generate_operators.py` | Generate In-betweens: key poses, request, result as Generated keys; operators |
 | `segment_track.py`, `segment_operators.py` | Prompt segments on the character, kept contiguous; add, remove, split, select |
 | `segment_draw.py`, `segment_mouse.py` | Prompt segments drawn in the animation editors, and handled with the mouse |
 | `core/` | Retargeting core, humanoid roles, role detection on a skeleton, neutral motion and skeleton types (see below) |
-| `backends/` | Motion model backends, each in its own folder (`kimodo/`, `interpolate/`), and the protocol with their worker processes |
+| `backends/` | Motion model backends, each in its own folder (`kimodo/`, `interpolate/`), the protocol with their worker processes, and `setup/`: installing and checking a model's environment |
 | `presets/` | Rig profile presets (Rigify, Auto-Rig Pro, CloudRig) |
 | `tests/` | Unit tests, headless Blender tests, Kimodo tests, real rigs (`python tests/run_tests.py`, see the file) |
 | `blender_manifest.toml` | Extension manifest |
