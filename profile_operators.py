@@ -16,6 +16,12 @@ from .core.roles import ROLES, get_role
 
 PRESETS_DIR = os.path.join(os.path.dirname(__file__), "presets")
 FRAME_RANGE = re.compile(r"^(-?\d+)(?:\s*-\s*(-?\d+))?$")
+# The presets' names before they were named after the rig only, as files saved then still record them
+RENAMED_PRESETS = {
+    "Rigify human (FK controls)": "Rigify",
+    "Auto-Rig Pro (FK controls)": "Auto-Rig Pro",
+    "CloudRig (FK controls)": "CloudRig",
+}
 
 
 def preset_files():
@@ -126,6 +132,7 @@ def source_label(source):
     """Where a profile comes from, for the panels"""
     if source == DETECTED_SOURCE:
         return "detected on the skeleton"
+    source = RENAMED_PRESETS.get(source, source)
     return f"preset '{source}'" if source else "set up by hand"
 
 
@@ -133,6 +140,7 @@ def describe_source(source):
     """'the preset X' or 'the bones detected on the skeleton', for messages"""
     if source == DETECTED_SOURCE:
         return "the bones detected on its skeleton"
+    source = RENAMED_PRESETS.get(source, source)
     return f"the preset '{source}'" if source else "set up by hand"
 
 

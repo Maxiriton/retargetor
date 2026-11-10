@@ -1,17 +1,20 @@
-"""Conversions between the add-on's neutral data (Blender conventions) and Kimodo's. numpy only: no bpy, no
-torch, so they can be tested without the model.
+"""Conversions between the add-on's neutral data (Blender conventions) and the models sharing NVIDIA's motion
+conventions (Kimodo, ARDY). numpy only: no bpy, no torch, so they can be tested without a model. Each backend gives
+its skeleton (ModelLayout), frame rate and end-effectors.
 
-Kimodo (checked in spikes/phase0 and phase1):
-- Y-up: Blender (x, y, z) -> Kimodo (x, z, -y). Meters.
-- Rest pose: the SOMA standard T-pose, so a joint's global rotation is its rotation from rest.
-- Constraints: local rotations as axis-angle, for the 30 joints the model works on, each relative to its
-  parent in the 77-joint skeleton (not in the 30-joint one: it matters for the hand end joints).
+The conventions (checked with Kimodo in spikes/phase0 and phase1, the same in ARDY's code):
+- Y-up: Blender (x, y, z) -> model (x, z, -y). Meters.
+- Rest pose: a T-pose with every joint's rest rotation the identity, so a joint's global rotation is its rotation
+  from rest.
+- Constraints: a list of dicts (load_constraints_lst), local rotations as axis-angle for the joints the model
+  works on (ModelLayout.model_names), each relative to its parent in the full skeleton (for SOMA, the 77-joint one,
+  not the 30-joint one the model works on: it matters for the hand end joints).
 - Canonical frame: the motion starts at XZ = (0, 0) facing +Z (heading 0, from the hips). The request's origin
   (the character on the first frame) is moved there (translation and rotation around Y), the key poses with it,
   and the result is moved back.
-- 30 fps. Key frames go to the nearest model frame; between key poses (and the ends of the range) the time is
-  stretched linearly so every key pose lands exactly on its model frame, then the result is resampled to the
-  scene's frame rate.
+- The model's frame rate: key frames go to the nearest model frame; between key poses (and the ends of the range)
+  the time is stretched linearly so every key pose lands exactly on its model frame, then the result is resampled
+  to the scene's frame rate.
 - Motion around the range (regenerating one prompt segment): generated with the range, its model frames
   constrained (whole body, hands and feet), as Kimodo's multi-prompt generation constrains the start of a segment
   with the end of the previous one. Only the range is returned.
@@ -26,28 +29,28 @@ import numpy as np
 from core import quat
 from core.skeleton import Joint, Skeleton
 
-# Blender -> Kimodo axes: v_kimodo = B_TO_K @ v_blender (a rotation, so its inverse is its transpose)
-B_TO_K = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]])
+# Blender -> model axes: v_model = BLENDER_TO_MODEL @ v_blender (a rotation, so its inverse is its transpose)
+BLENDER_TO_MODEL = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]])
 
-# Height of the hips in the rest pose (the 77-joint neutral joints are relative to the hips). Same as Kimodo's
-# BVH export, so the armature is the one Phase 0 imported.
+# Height of the hips in the rest pose, when the model's neutral joints are relative to the hips (SOMA). Same as
+# Kimodo's BVH export, so the armature is the one Phase 0 imported.
 HIPS_HEIGHT = 1.0
 # Length given to end joints (no child), along the up axis, as Blender's BVH importer does
 END_LENGTH = 0.001
 
 
-def to_kimodo(v):
-    return np.asarray(v, dtype=np.float64) @ B_TO_K.T
+def to_model(v):
+    return np.asarray(v, dtype=np.float64) @ BLENDER_TO_MODEL.T
 
 
 def to_blender(v):
-    return np.asarray(v, dtype=np.float64) @ B_TO_K
+    return np.asarray(v, dtype=np.float64) @ BLENDER_TO_MODEL
 
 
-def quat_to_kimodo(q):
-    """A rotation expressed in Blender's axes -> the same rotation in Kimodo's axes"""
+def quat_to_model(q):
+    """A rotation expressed in Blender's axes -> the same rotation in the model's axes"""
     q = np.asarray(q, dtype=np.float64)
-    return np.concatenate((q[..., :1], to_kimodo(q[..., 1:])), axis=-1)
+    return np.concatenate((q[..., :1], to_model(q[..., 1:])), axis=-1)
 
 
 def quat_to_blender(q):
@@ -57,11 +60,11 @@ def quat_to_blender(q):
 
 ### Skeleton
 
-def soma_skeleton(names, parents, neutral_joints):
-    """The 77-joint SOMA skeleton in Blender conventions, from Kimodo's joint names, parent indices (-1 for
-    the root) and neutral joints (Y-up, relative to the hips). Tails follow Blender's BVH importer: the child's
+def skeleton_from(names, parents, neutral_joints, hips_height=HIPS_HEIGHT):
+    """A model's skeleton in Blender conventions, from its joint names, parent indices (-1 for the root) and
+    neutral joints (Y-up; relative to the hips, raised by hips_height). Tails follow Blender's BVH importer: the child's
     head, the mean of the children's heads, or a short bone pointing up for end joints."""
-    heads = to_blender(neutral_joints) + np.array((0.0, 0.0, HIPS_HEIGHT))
+    heads = to_blender(neutral_joints) + np.array((0.0, 0.0, hips_height))
     children = {i: [] for i in range(len(names))}
     for i, p in enumerate(parents):
         if p >= 0:
@@ -164,16 +167,16 @@ def rotation_y(angle):
 
 
 def heading_angle(hips_rotation, right_hip_rest, left_hip_rest):
-    """Kimodo's heading of a pose (its compute_heading_angle): from the vector between the hip joints,
-    0 when the body faces +Z. hips_rotation: global rotation of the hips (Kimodo axes); *_rest: rest positions
-    of the right and left hip joints (Kimodo axes)."""
+    """The model's heading of a pose (compute_heading_angle in Kimodo and ARDY): from the vector between the hip
+    joints, 0 when the body faces +Z. hips_rotation: global rotation of the hips (model axes); *_rest: rest
+    positions of the right and left hip joints (model axes)."""
     d = quat.rotate(hips_rotation, np.asarray(right_hip_rest) - np.asarray(left_hip_rest))
     return math.atan2(d[2], -d[0])
 
 
 @dataclass
 class Canonical:
-    """The move bringing the first key pose to Kimodo's canonical frame: translate by -origin, then rotate
+    """The move bringing the first key pose to the model's canonical frame: translate by -origin, then rotate
     by `rotation` around Y."""
     origin: np.ndarray
     rotation: np.ndarray
@@ -183,7 +186,7 @@ class Canonical:
         return -2.0 * math.atan2(self.rotation[2], self.rotation[0])
 
     def apply(self, rotations, positions):
-        """Global rotations (..., 4) and positions (..., 3), Kimodo axes, into the canonical frame"""
+        """Global rotations (..., 4) and positions (..., 3), model axes, into the canonical frame"""
         return quat.multiply(self.rotation, rotations), quat.rotate(self.rotation, positions - self.origin)
 
     def undo(self, rotations, positions):
@@ -194,58 +197,60 @@ class Canonical:
 ### Request and result
 
 @dataclass
-class SomaLayout:
-    """What the conversions need to know about the SOMA skeletons"""
-    names77: list
-    parents77: list          # parent index in the 77-joint skeleton, -1 for the root
-    names30: list            # joints the model works on (constraints)
+class ModelLayout:
+    """What the conversions need to know about a model's skeleton.
+    names / parents: the skeleton of the model's output (parent index, -1 for the root); model_names: the joints
+    the model works on, in its order (constraints), a subset of names."""
+    names: list
+    parents: list
+    model_names: list
     root: str
     right_hip: str
     left_hip: str
-    neutral77: np.ndarray    # rest positions, Kimodo axes, relative to the hips
+    neutral: np.ndarray    # rest positions (names), model axes
 
     def index(self, name):
-        return self.names77.index(name)
+        return self.names.index(name)
 
 
 def _pose_arrays(pose, layout, what):
-    """Global rotations (77, 4) and root position (3,) of a Pose, Blender axes. Joints missing from the pose
+    """Global rotations (joints, 4) and root position (3,) of a Pose, Blender axes. Joints missing from the pose
     stay at rest relative to their parent."""
     if pose.root_position is None:
         raise ValueError(f"{what} has no root position.")
-    rotations = np.empty((len(layout.names77), 4))
-    for j, name in enumerate(layout.names77):
+    rotations = np.empty((len(layout.names), 4))
+    for j, name in enumerate(layout.names):
         given = pose.rotations.get(name)
         if given is not None:
             rotations[j] = given
         else:
-            parent = layout.parents77[j]
+            parent = layout.parents[j]
             rotations[j] = rotations[parent] if parent >= 0 else (1.0, 0.0, 0.0, 0.0)
     return rotations, np.asarray(pose.root_position, dtype=np.float64)
 
 
-def key_poses_to_kimodo(request, layout):
-    """Global rotations (keys, 77, 4) and root positions (keys, 3) of the request's key poses, in Kimodo's
+def key_poses_to_model(request, layout):
+    """Global rotations (keys, joints, 4) and root positions (keys, 3) of the request's key poses, in the model's
     axes. Joints missing from a pose stay at rest relative to their parent."""
     frames = sorted(request.key_poses)
-    rotations = np.empty((len(frames), len(layout.names77), 4))
+    rotations = np.empty((len(frames), len(layout.names), 4))
     roots = np.empty((len(frames), 3))
     for k, frame in enumerate(frames):
         rotations[k], roots[k] = _pose_arrays(request.key_poses[frame], layout, f"The key pose on frame {frame}")
-    return frames, quat_to_kimodo(rotations), to_kimodo(roots)
+    return frames, quat_to_model(rotations), to_model(roots)
 
 
 def canonical_from(rotations, roots, layout):
-    """The Canonical move of the first pose of rotations (poses, 77, 4) and roots (poses, 3), Kimodo axes"""
+    """The Canonical move of the first pose of rotations (poses, joints, 4) and roots (poses, 3), model axes"""
     hips = rotations[0, layout.index(layout.root)]
-    angle = heading_angle(hips, layout.neutral77[layout.index(layout.right_hip)],
-                          layout.neutral77[layout.index(layout.left_hip)])
+    angle = heading_angle(hips, layout.neutral[layout.index(layout.right_hip)],
+                          layout.neutral[layout.index(layout.left_hip)])
     origin = np.array((roots[0, 0], 0.0, roots[0, 2]))
     return Canonical(origin=origin, rotation=rotation_y(-angle))
 
 
 def end_effectors(constrained_joints, effectors):
-    """Kimodo's end-effector constraint types standing for a partial pose's joints, sorted, or None if the whole
+    """The end-effector constraint types standing for a partial pose's joints, sorted, or None if the whole
     body must be constrained (all joints, none, or a joint no end-effector covers). effectors: {constraint type:
     set of joints} (joints.END_EFFECTORS)."""
     if not constrained_joints:
@@ -260,18 +265,18 @@ def end_effectors(constrained_joints, effectors):
 
 
 def _motion_arrays(motion, layout, what):
-    """Global rotations (frames, 77, 4) and root positions (frames, 3) of a Motion, Kimodo axes"""
-    rotations = np.empty((len(motion.poses), len(layout.names77), 4))
+    """Global rotations (frames, joints, 4) and root positions (frames, 3) of a Motion, model axes"""
+    rotations = np.empty((len(motion.poses), len(layout.names), 4))
     roots = np.empty((len(motion.poses), 3))
     for k, pose in enumerate(motion.poses):
         rotations[k], roots[k] = _pose_arrays(pose, layout, f"The motion {what} the range, frame "
                                                             f"{motion.start_frame + k},")
-    return quat_to_kimodo(rotations), to_kimodo(roots)
+    return quat_to_model(rotations), to_model(roots)
 
 
 def context_samples(request, layout, timing, skip=()):
     """The model frames falling in the request's context motions (the motion just before and after its range):
-    (model frame indices, global rotations (n, 77, 4), root positions (n, 3)), Kimodo axes, the context sampled at
+    (model frame indices, global rotations (n, joints, 4), root positions (n, 3)), model axes, the context sampled at
     each one's time (slerp, lerp). The model frames in `skip` (key poses) are left out."""
     times = np.interp(np.arange(timing.count, dtype=np.float64), np.asarray(timing.anchor_indices, dtype=np.float64),
                       np.asarray(timing.anchors, dtype=np.float64))
@@ -292,12 +297,12 @@ def context_samples(request, layout, timing, skip=()):
         rotations.append(rot)
         roots.append(pos)
     if not indices:
-        return [], np.empty((0, len(layout.names77), 4)), np.empty((0, 3))
+        return [], np.empty((0, len(layout.names), 4)), np.empty((0, 3))
     return indices, np.concatenate(rotations), np.concatenate(roots)
 
 
 def request_to_constraints(request, layout, model_fps, effectors=None):
-    """Kimodo's inputs for a GenerationRequest.
+    """The model's inputs for a GenerationRequest.
     effectors: {end-effector name: joints} (joints.END_EFFECTORS): partial key poses become end-effector
     constraints; without it every key pose constrains the whole body.
     The motion around the range (request.context_before / context_after) is generated too, its model frames
@@ -306,9 +311,9 @@ def request_to_constraints(request, layout, model_fps, effectors=None):
     range only.
     The canonical frame comes from the first frame of the motion before the range, else from the request's origin
     (the character on the first frame), else from the first key pose. Returns (constraints list for
-    kimodo.constraints.load_constraints_lst, Canonical, Timing). Without key pose nor context, the constraints list
+    the model's load_constraints_lst, Canonical, Timing). Without key pose nor context, the constraints list
     is empty (prompt only). Raises ValueError if there is neither key pose, context nor origin."""
-    frames, rotations, roots = key_poses_to_kimodo(request, layout)
+    frames, rotations, roots = key_poses_to_model(request, layout)
     before, after = request.context_before, request.context_after
     first = before.start_frame if before is not None else request.start_frame
     last = after.end_frame if after is not None else request.end_frame
@@ -319,7 +324,7 @@ def request_to_constraints(request, layout, model_fps, effectors=None):
         canonical = canonical_from(*_motion_arrays(before, layout, "before"), layout)
     elif request.origin is not None:
         origin_rotation, origin_root = _pose_arrays(request.origin, layout, "The origin")
-        canonical = canonical_from(quat_to_kimodo(origin_rotation)[None], to_kimodo(origin_root)[None], layout)
+        canonical = canonical_from(quat_to_model(origin_rotation)[None], to_model(origin_root)[None], layout)
     elif frames:
         canonical = canonical_from(rotations, roots, layout)
     else:
@@ -333,15 +338,15 @@ def request_to_constraints(request, layout, model_fps, effectors=None):
     rotations, roots = canonical.apply(rotations, roots)
 
     local = []
-    for name in layout.names30:
+    for name in layout.model_names:
         j = layout.index(name)
-        parent = layout.parents77[j]
+        parent = layout.parents[j]
         q = rotations[:, j] if parent < 0 else quat.multiply(quat.conjugate(rotations[:, parent]), rotations[:, j])
         local.append(quat.to_axis_angle(q))
-    local = np.stack(local, axis=1)  # (items, 30, 3)
+    local = np.stack(local, axis=1)  # (items, model joints, 3)
     # Grouped by constraint type: the whole body, or each end-effector a key pose keys (a pose keying both hands is
-    # in both hand constraints). The context constrains the whole body, and the hands and feet by name (Kimodo's
-    # post-processing places those exactly), as Kimodo's multi-prompt transitions do.
+    # in both hand constraints). The context constrains the whole body, and the hands and feet by name (the
+    # models' post-processing places those exactly), as Kimodo's multi-prompt transitions do.
     context_kinds = ["fullbody"] + sorted(k for k in (effectors or {}) if k != "end-effector")
     groups = {}
     for k in range(len(indices)):
@@ -368,9 +373,9 @@ def request_to_constraints(request, layout, model_fps, effectors=None):
 
 
 def output_to_blender(global_rot_mats, root_positions, canonical, request, timing):
-    """Kimodo's output -> (rotations from rest (frames, 77, 4), root positions (frames, 3)) in Blender
+    """The model's output -> (rotations from rest (frames, joints, 4), root positions (frames, 3)) in Blender
     conventions, on every Blender frame from request.start_frame to request.end_frame at request.fps.
-    global_rot_mats: (T, 77, 3, 3); root_positions: (T, 3), in the canonical frame. timing: from
+    global_rot_mats: (T, joints, 3, 3); root_positions: (T, 3), in the canonical frame. timing: from
     request_to_constraints."""
     rotations = quat.from_matrix(global_rot_mats)
     rotations, positions = canonical.undo(rotations, np.asarray(root_positions, dtype=np.float64))
@@ -378,3 +383,43 @@ def output_to_blender(global_rot_mats, root_positions, canonical, request, timin
     times = model_times(frames, timing.anchors, timing.anchor_indices)
     rotations, positions = resample(rotations, positions, times)
     return quat_to_blender(rotations), to_blender(positions)
+
+
+class FrameStream:
+    """A request's Blender frames, converted as the model's frames come (a model generating window by window):
+    each Blender frame is sent once the model frames around its time are there. Same results as output_to_blender
+    on the whole output."""
+
+    def __init__(self, canonical, request, timing):
+        self.canonical = canonical
+        self.start_frame = request.start_frame
+        frames = np.arange(request.start_frame, request.end_frame + 1)
+        self.times = model_times(frames, timing.anchors, timing.anchor_indices)
+        self.rotations = np.empty((0, 0, 4))
+        self.positions = np.empty((0, 3))
+        self.sent = 0
+
+    @property
+    def done(self):
+        return self.sent >= len(self.times)
+
+    def add(self, global_rot_mats, root_positions):
+        """The next model frames: global_rot_mats (n, joints, 3, 3), root_positions (n, 3), canonical frame"""
+        rotations, positions = self.canonical.undo(quat.from_matrix(global_rot_mats),
+                                                   np.asarray(root_positions, dtype=np.float64))
+        self.rotations = rotations if not len(self.rotations) else np.concatenate((self.rotations, rotations))
+        self.positions = np.concatenate((self.positions, positions))
+
+    def ready(self, final=False):
+        """(first Blender frame, rotations from rest (frames, joints, 4), root positions (frames, 3)), Blender
+        conventions, of the frames complete since the last call; None if there are none. final: the model frames
+        are all there (the last ones may stop short of the range's end)."""
+        last = len(self.positions) - 1
+        if last < 0:
+            return None
+        count = len(self.times) if final else int(np.searchsorted(self.times, last + 1e-9, side="right"))
+        if count <= self.sent:
+            return None
+        first, self.sent = self.sent, count
+        rotations, positions = resample(self.rotations, self.positions, self.times[first:count])
+        return self.start_frame + first, quat_to_blender(rotations), to_blender(positions)

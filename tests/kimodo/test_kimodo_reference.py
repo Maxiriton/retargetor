@@ -15,7 +15,8 @@ import numpy as np
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, REPO)
 
-from backends.kimodo import convert, joints  # noqa: E402
+from backends.kimodo import joints  # noqa: E402
+from backends.shared import convert  # noqa: E402
 from backends.kimodo.worker import KimodoHandler  # noqa: E402
 from core import quat  # noqa: E402
 from core.motion import GenerationRequest, Pose  # noqa: E402
@@ -53,7 +54,7 @@ class TestKimodoReference(unittest.TestCase):
         poses = {}
         for k in ROUNDTRIP_FRAMES:
             rotations = convert.quat_to_blender(quat.from_matrix(rot[k]))
-            poses[k + 1] = Pose({n: tuple(rotations[j]) for j, n in enumerate(layout.names77)},
+            poses[k + 1] = Pose({n: tuple(rotations[j]) for j, n in enumerate(layout.names)},
                                 tuple(convert.to_blender(pos[k, root])))
         return GenerationRequest(ROUNDTRIP_FRAMES[0] + 1, ROUNDTRIP_FRAMES[-1] + 1, fps, poses)
 
@@ -63,7 +64,7 @@ class TestKimodoReference(unittest.TestCase):
         parents = [j.parent for j in self.skeleton.joints]
         self.assertEqual(parents, self.soma_json["parents77"])
         self.assertEqual(self.skeleton.root, joints.ROOT_JOINT)
-        self.assertEqual(self.layout.names30, self.soma_json["joints30"])
+        self.assertEqual(self.layout.model_names, self.soma_json["joints30"])
         for name in joints.JOINT_MAP.values():
             self.assertIn(name, names)
 
@@ -95,12 +96,12 @@ class TestKimodoReference(unittest.TestCase):
         constraints, canonical, _t = convert.request_to_constraints(request, self.layout, 30.0)
         constraint = load_constraints_lst(constraints, skel30)[0]
         positions = constraint.global_joints_positions.detach().cpu().numpy()  # (2, 30, 3)
-        index30 = [self.layout.index(n) for n in self.layout.names30]
+        index30 = [self.layout.index(n) for n in self.layout.model_names]
         expected = self.npz["posed_joints"][ROUNDTRIP_FRAMES][:, index30]
         expected = quat.rotate(canonical.rotation, expected - canonical.origin)
         # The hand end joints hang from the hand in the 30-joint skeleton, from the last finger bone in the
         # 77-joint one: their positions differ when the fingers are bent. Their rotations are checked above.
-        bodies = [i for i, n in enumerate(self.layout.names30) if not n.endswith(("ThumbEnd", "MiddleEnd"))]
+        bodies = [i for i, n in enumerate(self.layout.model_names) if not n.endswith(("ThumbEnd", "MiddleEnd"))]
         self.assertEqual(len(bodies), 26)
         errors = np.linalg.norm(positions - expected, axis=-1)[:, bodies]
         self.assertLess(float(np.max(errors)), 1e-4)
@@ -118,9 +119,9 @@ class TestKimodoReference(unittest.TestCase):
         root = self.npz["posed_joints"][start:end + 1, self.layout.index(self.layout.root)]
         rotations, positions = convert.output_to_blender(rot, root, identity, request, timing)
         self.assertEqual(rotations.shape, (end - start + 1, 77, 4))
-        back = quat.from_matrix(quat.to_matrix(convert.quat_to_kimodo(rotations)))
+        back = quat.from_matrix(quat.to_matrix(convert.quat_to_model(rotations)))
         self.assertLess(float(np.max(angles_deg(back, quat.from_matrix(rot)))), 1e-4)
-        np.testing.assert_allclose(convert.to_kimodo(positions), root, atol=1e-9)
+        np.testing.assert_allclose(convert.to_model(positions), root, atol=1e-9)
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ from bpy.types import Operator
 
 from . import generated_keys, generation
 from .backends import process, registry
-from .preferences import active_backend, backend_settings
+from .preferences import active_backend
 from .properties import get_character
 
 GENERATION_ERRORS = (ValueError, KeyError, generation.GenerationError, process.WorkerError)
@@ -275,7 +275,8 @@ class RTGTR_OT_BackendStart(Operator):
     def execute(self, context):
         backend = active_backend(context)
         try:
-            worker = registry.worker_for(backend, backend_settings(context, backend))
+            from . import model_setup
+            worker = model_setup.worker_for(context, backend)
             worker.submit("load")
         except GENERATION_ERRORS as e:
             self.report({'ERROR'}, str(e.args[0]) if e.args else str(e))

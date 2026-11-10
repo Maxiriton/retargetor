@@ -67,12 +67,36 @@ class Backend:
         """The bpy PropertyGroup holding this backend's preferences, or None. Called at registration."""
         return None
 
+    def configured(self, settings):
+        """The backend as its settings make it: a backend whose capabilities, joint map or skeleton depend on its
+        settings (the model chosen) returns a backend with the same id declaring them. settings: an instance of
+        settings_class(), or None. Default: the backend itself."""
+        return self
+
+    @property
+    def skeleton_id(self):
+        """Names the skeleton the backend generates on: the model's armature is rebuilt when it changes"""
+        return self.id
+
     def draw_settings(self, layout, settings):
         """Draw the backend's preferences (settings is an instance of settings_class())."""
 
-    def worker_command(self, settings):
+    @property
+    def installable(self):
+        """The backend has a model to install (it overrides requirements())"""
+        return type(self).requirements is not Backend.requirements
+
+    def requirements(self, machine, settings):
+        """What the model needs installed on this machine (backends.setup.spec.Requirements: Python version,
+        packages, weights...), or None when there is nothing to install (the worker runs with Blender's Python).
+        settings: an instance of settings_class(), or None."""
+        return None
+
+    def worker_command(self, python, settings, layout):
         """(argv, extra environment variables) starting the worker.
-        Raises ValueError with an explicit message if the settings don't allow it (missing path...)."""
+        python: the Python of the model's environment (None for a backend without requirements). layout: its
+        backends.setup.paths.Layout (where its weights are), or None.
+        Raises ValueError with an explicit message if the settings don't allow it."""
         raise NotImplementedError
 
     def range_problem(self, start_frame, end_frame, fps, key_count):

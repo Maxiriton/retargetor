@@ -1,15 +1,17 @@
 """The backends the add-on knows, and their workers (one per backend, kept running between generations).
 
-Adding a backend: a folder next to kimodo/ and interpolate/, and one line in BACKENDS. Never reorder the list:
+Adding a backend: a folder next to kimodo/, ardy/ and interpolate/, and one line in BACKENDS. Never reorder the list:
 the position of a backend is its number in the preferences file.
 """
 from . import process
+from .ardy.backend import ArdyBackend
 from .interpolate.backend import InterpolateBackend
 from .kimodo.backend import KimodoBackend
 
 BACKENDS = [
     KimodoBackend(),
     InterpolateBackend(),
+    ArdyBackend(),
 ]
 
 # {backend id: (Worker, (command, env)) }
@@ -29,10 +31,11 @@ def visible(developer=False):
     return [b for b in BACKENDS if developer or not b.developer_only]
 
 
-def worker_for(backend, settings):
+def worker_for(backend, python, settings, layout):
     """The backend's worker, created if needed (not started: requests start it). A worker started with other
-    settings is stopped and replaced. Raises ValueError if the settings don't allow starting it."""
-    command, env = backend.worker_command(settings)
+    settings is stopped and replaced. python, layout: its environment (Backend.worker_command).
+    Raises ValueError if the settings don't allow starting it."""
+    command, env = backend.worker_command(python, settings, layout)
     key = (tuple(command), tuple(sorted(env.items())))
     current = _workers.get(backend.id)
     if current is not None and current[1] != key:

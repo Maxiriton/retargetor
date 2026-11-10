@@ -15,5 +15,5 @@ class InterpolateBackend(Backend):
     load_timeout = 60.0
     generate_timeout = 120.0
 
-    def worker_command(self, settings):
+    def worker_command(self, python, settings, layout):
         return [blender_python(), "-I", "-u", worker_script(__file__)], {}

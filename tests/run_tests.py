@@ -1,7 +1,8 @@
 """Run every test: the plain-Python unit tests, then the headless Blender tests.
 
     python tests/run_tests.py [--blender <blender.exe>] [--spikes <folder with phase0/out and phase1/out>]
-                              [--kimodo-python <Kimodo venv python.exe>] [--rigs <rigs.json>] [--gui]
+                              [--kimodo-python <Kimodo venv python.exe>] [--models-folder <folder>]
+                              [--rigs <rigs.json>] [--gui]
 
 Blender 5.2+ is needed (default: the BLENDER environment variable, else the standard Windows install path).
 The unit tests run with Blender's own Python (it has numpy), found next to blender.exe.
@@ -15,6 +16,10 @@ touched, and simulated events (the real mouse and keyboard are ignored meanwhile
 --rigs: a JSON mapping the file keys of tests/fixtures/real_rigs.json to the rigs' files on this machine (not
 committed; default: the RETARGETOR_RIGS environment variable): each rig is set up, checked and generated on, with
 Kimodo too when --kimodo-python is given. Rigs whose file is missing are skipped.
+--models-folder: a models' folder where the add-on installed models (default: the RETARGETOR_MODELS_FOLDER environment
+variable): each model installed there is checked and generates (GPU): Kimodo (a generation), ARDY (base, prompt
+segments, one segment regenerated, the Core checkpoint: a few minutes, 17 GB of video memory). Nothing is installed
+by the tests.
 The migration test builds a legacy file with the add-on as it was before Phase 2 (commit LEGACY_COMMIT).
 """
 import argparse
@@ -147,6 +152,8 @@ def main():
     parser.add_argument("--blender", default=os.environ.get("BLENDER", DEFAULT_BLENDER))
     parser.add_argument("--spikes", default=os.environ.get("RETARGETOR_SPIKES", os.path.join(REPO, "spikes")))
     parser.add_argument("--kimodo-python", default=os.environ.get("RETARGETOR_KIMODO_PYTHON"))
+    parser.add_argument("--models-folder", default=os.environ.get("RETARGETOR_MODELS_FOLDER"),
+                        help="models' folder where the add-on installed Kimodo, ARDY")
     parser.add_argument("--rigs", default=os.environ.get("RETARGETOR_RIGS"),
                         help="JSON mapping the files of tests/fixtures/real_rigs.json to this machine's paths")
     parser.add_argument("--gui", action="store_true", help="also run the tests needing Blender's interface")
@@ -156,12 +163,19 @@ def main():
     results["unit"] = run_unit_tests(blender_python(args.blender))
 
     env = dict(os.environ, RETARGETOR_SPIKES=args.spikes)
+    if args.models_folder:
+        env["RETARGETOR_MODELS_FOLDER"] = args.models_folder
     with tempfile.TemporaryDirectory(prefix="retargetor_tests_") as scratch:
         results["panel"] = run_blender(args.blender, "test_panel.py", [scratch], env=env)
         results["segments"] = run_blender(args.blender, "test_segments.py", env=env)
         results["pose_io"] = run_blender(args.blender, "test_pose_io.py", env=env)
         results["skeleton_io"] = run_blender(args.blender, "test_skeleton_io.py", env=env)
         results["rig_setup"] = run_blender(args.blender, "test_rig_setup.py", env=env)
+        setup_dir = os.path.join(scratch, "model_setup")
+        os.makedirs(setup_dir)
+        results["model_setup"] = run_blender(args.blender, "test_model_setup.py",
+                                             [setup_dir] + ([args.kimodo_python] if args.kimodo_python else []),
+                                             env=env)
         lib_dir = os.path.join(scratch, "library")
         os.makedirs(lib_dir)
         results["library_override"] = run_blender(args.blender, "test_library_override.py", [lib_dir], env=env)
@@ -222,6 +236,19 @@ def main():
         if args.kimodo_python and os.path.exists(test_rig):
             results.update(run_kimodo_tests(args, env, scratch, test_rig,
                                             os.path.join(rig_dir, "rig_keyposes_ik.blend")))
+        if args.models_folder and os.path.exists(test_rig):
+            def installed(backend_id):
+                return os.path.isfile(os.path.join(args.models_folder, "models", backend_id, "install.json"))
+
+            if installed("kimodo"):
+                # Kimodo as the add-on installed it
+                out_dir = os.path.join(scratch, "kimodo_installed")
+                os.makedirs(out_dir)
+                results["kimodo_installed"] = run_blender(args.blender, "test_generate_kimodo.py",
+                                                          ["base", "managed", out_dir], blend=test_rig, env=env)
+            if installed("ardy"):
+                results["ardy"] = run_blender(args.blender, "test_generate_ardy.py", [args.models_folder],
+                                              blend=os.path.join(rig_dir, "rig_keyposes_ik.blend"), env=env)
 
     print("\nSummary:")
     for name, ok in results.items():

@@ -23,7 +23,8 @@ license = [
 
 # Setups are imported from / exported to JSON files
 [permissions]
-files = "Import and export retarget setups as JSON"
+files = "Import and export retarget setups as JSON, install the motion models"
+network = "Download the motion models, their Python environment and their weights"
 
 # Build settings: only the add-on goes into the package, not the spikes, tests or project notes.
 # https://docs.blender.org/manual/en/dev/advanced/extensions/command_line_arguments.html#command-line-args-extension-build

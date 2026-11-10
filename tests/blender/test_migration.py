@@ -1,5 +1,6 @@
 """Open a file made by the old version (legacy_setup.py): its scene.retarget_* setup must move onto the target
-object, and baking it with the new version must give exactly the keys the old version baked.
+object, and baking it with the new version must give exactly the keys the old version baked. A rig profile saving
+a preset's old name gets its current one.
 
     blender -b --factory-startup --python tests/blender/test_migration.py -- <dir with legacy.blend and legacy_bake.json>
 """
@@ -45,6 +46,17 @@ def main(out_dir):
     # A second load must not do anything (nothing left to migrate)
     from retargetor import migration
     checks.check(migration.migrate_all() == [], "migration runs only once")
+
+    # A rig profile saved with a preset's old name gets its current one, on load; the panels show it anyway
+    from retargetor import profile_operators
+    profile = target.data.retargetor_profile
+    profile.source = "Auto-Rig Pro (FK controls)"
+    checks.check(profile_operators.source_label(profile.source) == "preset 'Auto-Rig Pro'",
+                 f"an old preset name shown as the current one ({profile_operators.source_label(profile.source)})")
+    renamed = migration.migrate_all()
+    checks.check(profile.source == "Auto-Rig Pro" and len(renamed) == 1, f"an old preset name renamed ({renamed})")
+    checks.check(migration.migrate_all() == [], "renamed only once")
+    profile.source = ""
 
     bpy.context.view_layer.objects.active = target
     checks.check(bpy.ops.retargetor.simple_retarget() == {'FINISHED'}, "bake with the new version")
