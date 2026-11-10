@@ -30,9 +30,10 @@ TEXT_ENCODER = (
             required_files=("adapter_config.json", "adapter_model.safetensors"),
             license_url="https://huggingface.co/McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised"),
     Weights("Text encoder (Meta Llama 3 8B Instruct)", "meta-llama/Meta-Llama-3-8B-Instruct", 16.1,
-            # The safetensors weights only, not the original PyTorch checkpoint (another 16 GB)
+            # The safetensors weights only, not the original PyTorch checkpoint (another 16 GB). The tokenizer
+            # comes from the MNTP adapter's repository.
             allow_patterns=("*.json", "*.safetensors"),
-            required_files=("config.json", "tokenizer.json", "model.safetensors.index.json"),
+            required_files=("config.json", "model.safetensors.index.json"),
             gated=True, license_url=LLAMA_LICENSE),
 )
 

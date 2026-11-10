@@ -66,7 +66,7 @@ def is_complete(layout):
 
 
 class Step:
-    def __init__(self, step_id, label, weight, key, run, done_check=None):
+    def __init__(self, step_id, label, weight, key, run, done_check=None, skip_when_done=False):
         self.id = step_id
         self.label = label
         self.weight = weight
@@ -74,6 +74,9 @@ class Step:
         self.run = run
         # Optional: whether what the step makes is really there (a recorded step is redone if not)
         self.done_check = done_check
+        # What the step makes may already be there without the installer (weights in the Hugging Face cache, from
+        # the user's other tools): skipped then, unless repairing
+        self.skip_when_done = skip_when_done
         self.skipped = False
 
 
@@ -129,7 +132,8 @@ class Installer:
             steps.append(Step(f"weights:{weights.repo_id}", f"Downloading {weights.label} ({weights.size_gb:.1f} GB)",
                               max(1.0, weights.size_gb * 4), step_key(weights),
                               lambda w=weights: self._download(w),
-                              lambda w=weights: weights_status.status(w, layout, self.cache_dir).present))
+                              lambda w=weights: weights_status.status(w, layout, self.cache_dir).present,
+                              skip_when_done=True))
         return steps
 
     @property
@@ -206,6 +210,12 @@ class Installer:
                 if recorded and (step.done_check is None or step.done_check()):
                     step.skipped = True
                     self._write_log(f"--- {step.label}: already done")
+                    continue
+                if step.skip_when_done and not self.repair and step.done_check():
+                    step.skipped = True
+                    self._write_log(f"--- {step.label}: already there")
+                    state["steps"][step.id] = step.key
+                    write_state(self.layout, state)
                     continue
                 self._write_log(f"--- {step.label}")
                 if step.id == "environment":
@@ -390,6 +400,11 @@ class Installer:
             raise InstallError(self._download_message(weights, result), self._download_problem(weights, result))
         status = weights_status.status(weights, self.layout, self.cache_dir)
         if not status.present:
+            if weights.gated and sign_in_expired(output):
+                # huggingface_hub falls back to the files already in its cache when the user's sign-in has expired
+                raise InstallError(f"Your Hugging Face sign-in has expired, so {weights.label} can't be downloaded: "
+                                   f"sign in again (Sign In button), then resume the install.",
+                                   self._download_problem(weights, {"kind": "auth", "signed_in": False}))
             raise InstallError(f"{weights.label} was downloaded but files are missing: {', '.join(status.missing)}.")
 
     @staticmethod
@@ -419,6 +434,11 @@ class Installer:
         if kind == "network":
             return f"Unable to reach Hugging Face to download {weights.label}: check the connection. ({result.get('message', '')})"
         return f"Downloading {weights.label} failed: {result.get('message') or 'unknown error'}"
+
+
+def sign_in_expired(lines):
+    """huggingface_hub said the user's sign-in has expired (in a download's output)"""
+    return any("expired" in line.lower() and "auth login" in line for line in lines)
 
 
 def remove(layout):
