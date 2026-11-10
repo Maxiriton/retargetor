@@ -1,4 +1,5 @@
-"""Kimodo conversions that don't need Kimodo: axes, frame rates, canonical frame and heading. No Blender.
+"""The shared conversions (backends/shared/convert.py) without a model: axes, frame rates, canonical frame and
+heading. No Blender.
 
 The comparisons with Kimodo's own outputs (Phase 0 references) are in tests/kimodo/, run with the Kimodo venv.
 """
@@ -13,7 +14,7 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
-from backends.kimodo import convert  # noqa: E402
+from backends.shared import convert  # noqa: E402
 from core import quat  # noqa: E402
 from core.motion import GenerationRequest, Motion, Pose  # noqa: E402
 
@@ -23,8 +24,8 @@ def small_layout():
     names = ["Hips", "RightLeg", "LeftLeg", "Spine1", "RightShin"]
     parents = [-1, 0, 0, 0, 1]
     neutral = np.array([(0, 0, 0), (-0.1, -0.05, 0), (0.1, -0.05, 0), (0, 0.1, 0), (-0.1, -0.5, 0)], dtype=float)
-    return convert.SomaLayout(names77=names, parents77=parents, names30=["Hips", "RightLeg", "LeftLeg", "Spine1"],
-                              root="Hips", right_hip="RightLeg", left_hip="LeftLeg", neutral77=neutral)
+    return convert.ModelLayout(names=names, parents=parents, model_names=["Hips", "RightLeg", "LeftLeg", "Spine1"],
+                              root="Hips", right_hip="RightLeg", left_hip="LeftLeg", neutral=neutral)
 
 
 def turn_z(angle):
@@ -41,21 +42,21 @@ def make_request(turn=0.0, offset=(0.0, 0.0), fps=30.0, frames=(1, 31, 61)):
         root = np.array((0.0, -0.5 * k, 0.95))
         rotations = quat.multiply(turn_z(turn), local)
         root = quat.rotate(turn_z(turn), root) + np.array((offset[0], offset[1], 0.0))
-        names = small_layout().names77
+        names = small_layout().names
         poses[frame] = Pose({n: tuple(rotations[j]) for j, n in enumerate(names)}, tuple(root))
     return GenerationRequest(frames[0], frames[-1], fps, poses)
 
 
 class TestAxes(unittest.TestCase):
     def test_axes(self):
-        np.testing.assert_allclose(convert.to_kimodo((0.0, 1.0, 0.0)), (0.0, 0.0, -1.0))
-        np.testing.assert_allclose(convert.to_kimodo((0.0, 0.0, 1.0)), (0.0, 1.0, 0.0))
+        np.testing.assert_allclose(convert.to_model((0.0, 1.0, 0.0)), (0.0, 0.0, -1.0))
+        np.testing.assert_allclose(convert.to_model((0.0, 0.0, 1.0)), (0.0, 1.0, 0.0))
         q = quat.normalize(np.random.default_rng(0).normal(size=(10, 4)))
-        np.testing.assert_allclose(convert.quat_to_blender(convert.quat_to_kimodo(q)), q)
+        np.testing.assert_allclose(convert.quat_to_blender(convert.quat_to_model(q)), q)
         # The same rotation in both bases: rotating a converted vector = converting the rotated vector
         v = np.random.default_rng(1).normal(size=(10, 3))
-        np.testing.assert_allclose(quat.rotate(convert.quat_to_kimodo(q), convert.to_kimodo(v)),
-                                   convert.to_kimodo(quat.rotate(q, v)), atol=1e-12)
+        np.testing.assert_allclose(quat.rotate(convert.quat_to_model(q), convert.to_model(v)),
+                                   convert.to_model(quat.rotate(q, v)), atol=1e-12)
 
 
 class TestFrameRates(unittest.TestCase):
@@ -112,19 +113,19 @@ class TestFrameRates(unittest.TestCase):
 class TestCanonical(unittest.TestCase):
     def test_heading(self):
         layout = small_layout()
-        right, left = layout.neutral77[1], layout.neutral77[2]
+        right, left = layout.neutral[1], layout.neutral[2]
         self.assertAlmostEqual(convert.heading_angle((1.0, 0, 0, 0), right, left), 0.0)
         for angle in (0.5, -2.0, 3.0):
             self.assertAlmostEqual(convert.heading_angle(convert.rotation_y(angle), right, left), angle)
 
     def test_apply_undo(self):
         layout = small_layout()
-        _frames, rotations, roots = convert.key_poses_to_kimodo(make_request(turn=1.2, offset=(3.0, -2.0)), layout)
+        _frames, rotations, roots = convert.key_poses_to_model(make_request(turn=1.2, offset=(3.0, -2.0)), layout)
         canonical = convert.canonical_from(rotations, roots, layout)
         rot, pos = canonical.apply(rotations, roots)
         np.testing.assert_allclose(pos[0, [0, 2]], (0.0, 0.0), atol=1e-12)
         self.assertAlmostEqual(pos[0, 1], roots[0, 1])  # the height is kept
-        self.assertAlmostEqual(convert.heading_angle(rot[0, 0], layout.neutral77[1], layout.neutral77[2]), 0.0)
+        self.assertAlmostEqual(convert.heading_angle(rot[0, 0], layout.neutral[1], layout.neutral[2]), 0.0)
         back_rot, back_pos = canonical.undo(rot, pos)
         np.testing.assert_allclose(back_pos, roots, atol=1e-12)
         self.assertLess(np.max(np.abs(np.abs(np.sum(back_rot * rotations, -1)) - 1.0)), 1e-12)
@@ -150,7 +151,7 @@ class TestCanonical(unittest.TestCase):
         request = make_request(turn=math.pi / 2, offset=(4.0, 1.0))
         _cons, canonical, timing = convert.request_to_constraints(request, layout, 30.0)
         indices, count = timing.key_indices, timing.count
-        frames, rotations, roots = convert.key_poses_to_kimodo(request, layout)
+        frames, rotations, roots = convert.key_poses_to_model(request, layout)
         rot_c, pos_c = canonical.apply(rotations, roots)
         # A fake model output holding the canonical key poses on their frames
         out_rot = np.tile(quat.to_matrix(rot_c[0]), (count, 1, 1, 1))
@@ -163,7 +164,7 @@ class TestCanonical(unittest.TestCase):
         for frame in frames:
             pose = request.key_poses[frame]
             np.testing.assert_allclose(pos_b[frame - 1], pose.root_position, atol=1e-9)
-            expected = np.array([pose.rotations[n] for n in layout.names77])
+            expected = np.array([pose.rotations[n] for n in layout.names])
             self.assertLess(np.max(1.0 - np.abs(np.sum(rot_b[frame - 1] * expected, -1))), 1e-12)
 
 
@@ -231,7 +232,7 @@ class TestCanonical(unittest.TestCase):
         self.assertAlmostEqual(canonical.heading, from_first.heading)
         # The constraints are the context's poses, in the canonical frame
         full = constraints[0]
-        _r, roots = convert.key_poses_to_kimodo(GenerationRequest(26, 26, 30.0, {26: poses[25]}), layout)[1:]
+        _r, roots = convert.key_poses_to_model(GenerationRequest(26, 26, 30.0, {26: poses[25]}), layout)[1:]
         _rot, expected = canonical.apply(np.zeros((1, 4)) + (1, 0, 0, 0), roots)
         np.testing.assert_allclose(full["root_positions"][0], expected[0], atol=1e-12)
         # Output: the range only, the model frames of the range at their times

@@ -12,7 +12,8 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from backends import protocol  # noqa: E402
-from backends.kimodo import convert, joints  # noqa: E402
+from backends.kimodo import joints  # noqa: E402
+from backends.shared import convert  # noqa: E402
 
 BACKEND_ID = "kimodo"
 DIFFUSION_STEPS = 100
@@ -34,10 +35,10 @@ class KimodoHandler:
             parents = [int(p) for p in skel77.joint_parents.tolist()]
             neutral = skel77.neutral_joints.detach().cpu().numpy()
             right_hip, left_hip = skel77.hip_joint_names
-            self._layout = convert.SomaLayout(
-                names77=names, parents77=parents, names30=list(skel30.bone_order_names),
-                root=names[skel77.root_idx], right_hip=right_hip, left_hip=left_hip, neutral77=neutral)
-            self._skeleton = convert.soma_skeleton(names, parents, neutral)
+            self._layout = convert.ModelLayout(
+                names=names, parents=parents, model_names=list(skel30.bone_order_names),
+                root=names[skel77.root_idx], right_hip=right_hip, left_hip=left_hip, neutral=neutral)
+            self._skeleton = convert.skeleton_from(names, parents, neutral)
             if self._skeleton.root != joints.ROOT_JOINT:
                 raise RuntimeError(f"Unexpected SOMA root joint '{self._skeleton.root}'.")
         return self._layout
