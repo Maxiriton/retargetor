@@ -13,8 +13,8 @@ _MODEL_ITEMS = [(name, checkpoint.label, f"nvidia/{name}: {checkpoint.skeleton.u
 
 
 class RTGTR_ArdySettings(PropertyGroup):
-    model: EnumProperty(name="Checkpoint", items=_MODEL_ITEMS, default=models.DEFAULT_MODEL,
-                        description="ARDY checkpoint to load (its weights are downloaded by the install): the SOMA "
+    model: EnumProperty(name="Model", items=_MODEL_ITEMS, default=models.DEFAULT_MODEL,
+                        description="ARDY model to load (its weights are downloaded by the install): the SOMA "
                                     "skeleton at 30 fps, or ARDY's own Core skeleton at 20 fps")
 
 
@@ -33,7 +33,7 @@ def checkpoint_capabilities(checkpoint):
 class ArdyBackend(Backend):
     id = "ardy"
     label = "ARDY"
-    description = ("NVIDIA ARDY: autoregressive, any length, streamed window by window; text prompt and key poses "
+    description = ("NVIDIA ARDY: text prompt and key poses, any length, streamed window by window "
                    "(needs a CUDA GPU with 17 GB)")
     checkpoint_name = models.DEFAULT_MODEL
     capabilities = checkpoint_capabilities(models.checkpoint(models.DEFAULT_MODEL))

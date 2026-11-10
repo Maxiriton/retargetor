@@ -20,9 +20,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from backends import protocol  # noqa: E402
 from backends.ardy import models  # noqa: E402
-from backends.shared import convert  # noqa: E402
+from backends.shared import convert, messages  # noqa: E402
 
 BACKEND_ID = "ardy"
+LABEL = "ARDY"
 
 
 class ArdyHandler:
@@ -74,12 +75,12 @@ class ArdyHandler:
     def load(self, context):
         if self.model is not None:
             return
-        context.progress(0.0, "Loading ARDY")
+        context.progress(0.0, messages.loading(LABEL))
         import torch
         from ardy.model import load_model
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         if device == "cpu":
-            print("No CUDA device: ARDY runs on the CPU, very slowly.", file=sys.stderr)
+            print(messages.no_cuda(LABEL), file=sys.stderr)
         self.model = load_model(self.model_name, device=device)
         self._skel = self.model.skeleton
         fps = float(self.model.motion_rep.fps)
@@ -113,7 +114,7 @@ class ArdyHandler:
             seeds = [segment.seed for segment in segments]
         else:
             ends, prompts, seeds = [timing.count], [request.prompt], [request.seed]
-        context.progress(0.02, "Encoding the prompt")
+        context.progress(0.02, messages.encoding(len(prompts)))
         features = [self._encode(prompt) for prompt in prompts]
         context.check_cancelled()
 
@@ -127,8 +128,7 @@ class ArdyHandler:
             if seeds[segment] is not None and generator.frames == (ends[segment - 1] if segment else 0):
                 seed_everything(int(seeds[segment]))
             context.progress(0.05 + 0.9 * generator.frames / total,
-                             f"Segment {segment + 1}/{len(ends)}: frame {generator.frames}/{total}"
-                             if len(ends) > 1 else f"Frame {generator.frames}/{total}")
+                             messages.in_segment(messages.GENERATING, segment, len(ends)))
             stop = min(ends[segment], total)
             with torch.no_grad():
                 rotations, roots = generator.next_window(features[segment], stop)

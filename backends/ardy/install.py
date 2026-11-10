@@ -40,7 +40,7 @@ TEXT_ENCODER = (
 
 def checkpoint_weights(model):
     checkpoint = models.CHECKPOINTS[model]
-    return Weights(f"{checkpoint.label} checkpoint", f"nvidia/{model}", checkpoint.size_gb,
+    return Weights(f"{model} weights", f"nvidia/{model}", checkpoint.size_gb,
                    required_files=("config.yaml", "denoiser.safetensors"), license_url=NVIDIA_MODEL_LICENSE)
 
 
@@ -64,7 +64,7 @@ def requirements(machine, model=models.DEFAULT_MODEL):
                     # The PyTorch build installed above stays: its version (2.7.1+cu126) matches the pin
                     (f"ardy @ {ARCHIVE}",) + torch.requirements, env=env)
     notes = [f"ARDY from NVIDIA ({REPOSITORY}, commit {COMMIT[:7]}), its {models.CHECKPOINTS[model].label} "
-             f"checkpoint, and its text encoder: LLM2Vec on Meta's Llama 3 8B Instruct, which needs your Hugging Face "
+             f"model, and its text encoder: LLM2Vec on Meta's Llama 3 8B Instruct, which needs your Hugging Face "
              f"access (requested on its page)."]
     if not build:
         notes.append("No C++ compiler (or git) found: ARDY is installed without its post-processing, so key poses "
@@ -83,6 +83,6 @@ def requirements(machine, model=models.DEFAULT_MODEL):
         disk_gb=6.0,
         notes=tuple(notes),
         licences=(("ARDY code: Apache-2.0", f"{REPOSITORY}/blob/{COMMIT}/LICENSE"),
-                  ("ARDY checkpoints: NVIDIA Open Model License", NVIDIA_MODEL_LICENSE),
+                  ("ARDY weights: NVIDIA Open Model License", NVIDIA_MODEL_LICENSE),
                   ("Text encoder: Meta Llama 3 Community License, LLM2Vec: MIT", LLAMA_LICENSE)),
     )

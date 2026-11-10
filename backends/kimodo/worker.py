@@ -1,8 +1,8 @@
 """The Kimodo backend's worker, run with the Python of the Kimodo venv:
     <kimodo-venv>/Scripts/python.exe -I -u worker.py --model Kimodo-SOMA-RP-v1.1
 
-The model is loaded once (on "load", or on the first generation) and kept loaded: the first generation takes
-about 10 s more (text encoder), the next ones about 3 s on an RTX 3090. The SOMA skeleton is read from the
+The model and its text encoder are loaded once (on "load", or on the first generation) and kept loaded; a
+generation then takes about 3 s on an RTX 3090. The SOMA skeleton is read from the
 user's own Kimodo install, so no SOMA data ships with the add-on.
 """
 import argparse
@@ -13,9 +13,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from backends import protocol  # noqa: E402
 from backends.kimodo import joints  # noqa: E402
-from backends.shared import convert  # noqa: E402
+from backends.shared import convert, messages  # noqa: E402
 
 BACKEND_ID = "kimodo"
+LABEL = "Kimodo"
 DIFFUSION_STEPS = 100
 
 
@@ -50,13 +51,13 @@ class KimodoHandler:
     def load(self, context):
         if self.model is not None:
             return
-        context.progress(0.0, "Loading Kimodo")
+        context.progress(0.0, messages.loading(LABEL))
         demo_without_viewer()
         import torch
         from kimodo import load_model
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         if device == "cpu":
-            print("No CUDA device: Kimodo runs on the CPU, very slowly.", file=sys.stderr)
+            print(messages.no_cuda(LABEL), file=sys.stderr)
         self.model = load_model(self.model_name, device=device, default_family="Kimodo")
         # The fork's text encoder loads its weights on first use, from a folder baked into its source by its own
         # installer: point it to the folder the add-on downloaded them to
@@ -64,6 +65,9 @@ class KimodoHandler:
         encoder = getattr(self.model, "text_encoder", None)
         if folder and os.path.isdir(folder) and hasattr(encoder, "custom_dir"):
             encoder.custom_dir = folder
+        # The fork loads its text encoder on first use: load it now, so that the model is ready once loaded
+        if getattr(encoder, "model", True) is None and hasattr(encoder, "reload"):
+            encoder.reload()
         if abs(float(self.model.fps) - joints.MODEL_FPS) > 1e-6:
             raise RuntimeError(f"The model runs at {self.model.fps} fps, the backend expects {joints.MODEL_FPS}.")
 
@@ -87,9 +91,10 @@ class KimodoHandler:
                 steps = list(steps)
                 for i, step in enumerate(steps):
                     fraction = (index + i / len(steps)) / count
-                    context.progress(0.05 + 0.85 * fraction, f"Segment {index + 1}/{count}: denoising")
+                    context.progress(0.05 + 0.85 * fraction, messages.in_segment(messages.GENERATING, index, count))
                     yield step
-                context.progress(0.05 + 0.85 * (index + 1) / count, f"Segment {index + 1}/{count}: post-processing")
+                context.progress(0.05 + 0.85 * (index + 1) / count,
+                                 messages.in_segment(messages.POST_PROCESSING, index, count))
 
             kwargs["progress_bar"] = progress_bar
             return original(*args, **kwargs)
@@ -122,12 +127,12 @@ class KimodoHandler:
             steps = list(steps)
             for i, step in enumerate(steps):
                 # Raises Cancelled when the add-on cancels: the denoising loop stops there
-                context.progress(0.05 + 0.85 * i / len(steps), "Denoising")
+                context.progress(0.05 + 0.85 * i / len(steps), messages.GENERATING)
                 yield step
             # Kimodo asks for the next step once the denoising is over: its post-processing comes next
-            context.progress(0.9, "Post-processing")
+            context.progress(0.9, messages.POST_PROCESSING)
 
-        context.progress(0.02, "Encoding the prompt")
+        context.progress(0.02, messages.encoding(len(request.segments or [None])))
         if request.segments:
             output = self._generate_segments(request, timing, constraint_list, context)
         else:

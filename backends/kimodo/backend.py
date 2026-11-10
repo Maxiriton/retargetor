@@ -7,7 +7,8 @@ from bpy.types import PropertyGroup
 from ..base import Backend, Capabilities, worker_script
 from . import install, joints
 
-_MODEL_ITEMS = [(name, name, f"nvidia/{name}") for name in install.MODEL_SIZES]
+_MODEL_ITEMS = [(name, label, f"nvidia/{name}: SOMA skeleton, {joints.MODEL_FPS:g} fps")
+                for name, label in joints.MODEL_LABELS.items()]
 
 
 class RTGTR_KimodoSettings(PropertyGroup):
@@ -18,7 +19,8 @@ class RTGTR_KimodoSettings(PropertyGroup):
 class KimodoBackend(Backend):
     id = "kimodo"
     label = "Kimodo"
-    description = "NVIDIA Kimodo, SOMA skeleton: text prompt and full-body key poses (needs a CUDA GPU)"
+    description = (f"NVIDIA Kimodo: text prompt and key poses, up to {joints.MAX_DURATION:g} s at a time "
+                   "(needs a CUDA GPU with 8 GB)")
     capabilities = Capabilities(prompt=True, seed=True, max_duration=joints.MAX_DURATION,
                                 native_fps=joints.MODEL_FPS, min_key_poses=0, partial_poses=True,
                                 prompt_segments=True,

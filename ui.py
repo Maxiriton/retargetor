@@ -360,8 +360,10 @@ def worker_status(backend):
     worker = registry.existing_worker(backend.id)
     if worker is None or worker.state == process.STOPPED:
         return "Stopped", 'RADIOBUT_OFF', "Start", False, worker.error if worker is not None else ""
-    if worker.state == process.STARTING or (worker.busy and not worker.loaded):
+    if worker.state == process.STARTING:
         label, icon = "Starting", 'SORTTIME'
+    elif worker.busy and not worker.loaded:
+        label, icon = "Loading", 'SORTTIME'
     elif worker.busy:
         label, icon = "Busy", 'SORTTIME'
     elif worker.loaded:

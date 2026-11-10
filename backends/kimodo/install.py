@@ -26,7 +26,7 @@ MOTION_CORRECTION_WHEELS = {
 # The text encoder, in a folder of its own: the worker points the fork's encoder to it
 TEXT_ENCODER_FOLDER = "llm2vec-model"
 TEXT_ENCODER = Weights(
-    "Text encoder (LLM2Vec / Llama 3 8B, 4-bit)", "Aero-Ex/KIMODO-Meta3_llm2vec_NF4", 4.67,
+    "Text encoder (LLM2Vec on Llama 3 8B, 4-bit)", "Aero-Ex/KIMODO-Meta3_llm2vec_NF4", 4.67,
     revision="207f0c64a7325f6045d15c68c5ea9e961c18fafd", folder=TEXT_ENCODER_FOLDER,
     required_files=("config.json", "llm2vec_config.json", "model.safetensors", "tokenizer.json"),
     license_url="https://www.llama.com/llama3/license/")
@@ -80,7 +80,7 @@ def requirements(machine, model=joints.DEFAULT_MODEL):
         weights=(model_weights(model), TEXT_ENCODER),
         # What a generation imports, psutil included (the text encoder's memory manager)
         imports=("torch", "kimodo", "transformers", "bitsandbytes", "psutil"),
-        optional_imports=(("motion_correction", "Kimodo's post-processing is off: key poses are not hit exactly."),),
+        optional_imports=(("motion_correction", "Kimodo's post-processing is off: key poses are followed less exactly."),),
         cuda=True,
         # Measured: 6.8 GB on an RTX 3090 (4-bit text encoder, 10 s of motion)
         min_vram_gb=8.0,

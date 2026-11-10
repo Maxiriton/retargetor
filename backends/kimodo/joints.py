@@ -8,3 +8,5 @@ MAX_DURATION = 10.0
 # default, num_transition_frames)
 TRANSITION_FRAMES = 5
 DEFAULT_MODEL = "Kimodo-SOMA-RP-v1.1"
+# The models the preferences offer, as they are shown there (same form as ARDY's checkpoints)
+MODEL_LABELS = {"Kimodo-SOMA-RP-v1.1": "SOMA, v1.1", "Kimodo-SOMA-RP-v1": "SOMA, v1"}
