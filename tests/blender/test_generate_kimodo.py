@@ -315,7 +315,12 @@ def run_range(checks, kimodo_python):
     print(f"FINDING prompt only: walked {walked:.2f} m, {along:.2f} m forward")
     checks.check(along > 0.5, f"prompt only: walks forward, where the character faces ({along:.2f} m)")
 
-    # One key pose, at the start: frames 120-239 start from the key pose on frame 120
+    # The generation made prompt segment 1 (shown in the timeline)
+    checks.check([(i.frame_start, i.frame_end, i.prompt) for i in state.segments] == [(200, 289, "A person walks forward")],
+                 "the generation became prompt segment 1")
+    # One key pose, at the start: frames 120-239 start from the key pose on frame 120 (without the segment, the
+    # custom range is used again)
+    state.segments.clear()
     state.range_start, state.range_duration = 120, 120
     before = motion_snapshot(rig, [120])
     task = generate(checks, "starting from one key pose")
@@ -326,6 +331,7 @@ def run_range(checks, kimodo_python):
     checks.below(jump_cm(rig, 120, 121), 5.0, "one key pose at the start: no jump after it (cm)")
 
     # One key pose, at the end: frames 70-120 end on the key pose on frame 120
+    state.segments.clear()
     state.range_start, state.range_duration = 70, 51
     state.prompt = "A person takes a few steps"
     before = motion_snapshot(rig, [120])

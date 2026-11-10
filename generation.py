@@ -640,6 +640,10 @@ def generation_chunks(state, backend, start, end):
     track = segment_track.read_track(state)
     if not track:
         return [Chunk(start, end, start, state.prompt, state.seed)]
+    if len(track) == 1:
+        # One segment is one prompt: the same request as without segments (Kimodo's multi-prompt generation gives
+        # another motion for the same prompt and seed)
+        return [Chunk(start, end, start, track[0].prompt, track[0].seed)]
     if backend.capabilities.prompt_segments:
         return [Chunk(start, end, start, segments=track)]
     return [Chunk(s.start_frame, s.end_frame, s.start_frame - 1 if i > 0 else s.start_frame, s.prompt, s.seed)
@@ -966,6 +970,16 @@ class GenerationTask:
             generated_keys.record_added(rig, self.keys_before)
         if self.segment_count:
             segment_track.mark_generated(rig.retargetor, self.segment_index)
+        elif self.backend.capabilities.prompt and rig.is_editable:
+            # The generation becomes the character's first prompt segment, shown in the timeline: its band is
+            # edited and regenerated like the others (the user's request)
+            from .core import segments as core_segments
+            state = rig.retargetor
+            track = core_segments.append([], self.end_frame - self.start_frame + 1, state.prompt, state.seed,
+                                         start_frame=self.start_frame)
+            segment_track.write_track(state, track, active=0)
+            segment_track.mark_generated(state)
+            self.notes.append(f"Prompt segment 1 made from the prompt and frames {self.start_frame}-{self.end_frame}")
         self.result = tuple(self._written)
         self.stage = FINISHED
         return True
