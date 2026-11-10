@@ -284,6 +284,27 @@ class TestInstaller(unittest.TestCase):
         finally:
             current._log.close()
 
+    def test_python_stays_in_the_models_folder(self):
+        """uv's Python install writes no executable in ~/.local/bin and no Windows registry entry"""
+        commands = []
+
+        class Recording(installer.Installer):
+            def run_command(self, argv, extra_env=(), poll=None):
+                commands.append((argv, self._command_env(extra_env)))
+                return []
+
+        for system in ("windows", "linux"):
+            commands.clear()
+            current = Recording("model", "Model", requirements(), paths.Layout(self.tmp.name, "m", system),
+                                Machine(system, "x86_64"))
+            current._install_python()
+            argv, env = commands[0]
+            self.assertIn("--no-bin", argv)
+            self.assertEqual("--no-registry" in argv, system == "windows")
+            self.assertEqual(argv[-1], "3.11")
+            self.assertEqual((env["UV_PYTHON_INSTALL_BIN"], env["UV_PYTHON_INSTALL_REGISTRY"]), ("0", "0"))
+            self.assertEqual(env["UV_PYTHON_INSTALL_DIR"], current.layout.python_dir)
+
     def test_download_messages(self):
         gated = Weights("Llama", "meta-llama/Meta-Llama-3-8B-Instruct", 15.0, gated=True)
         message = installer.Installer._download_message(gated, {"kind": "gated", "signed_in": False})

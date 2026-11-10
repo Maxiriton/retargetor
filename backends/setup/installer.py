@@ -262,6 +262,9 @@ class Installer:
             "UV_PYTHON_PREFERENCE": "only-managed",
             "UV_NO_CONFIG": "1",
             "UV_NO_PROGRESS": "1",
+            # Python builds stay in the models' folder (see _install_python), even when uv venv fetches one
+            "UV_PYTHON_INSTALL_BIN": "0",
+            "UV_PYTHON_INSTALL_REGISTRY": "0",
             "PYTHONIOENCODING": "utf-8",
             "PYTHONUTF8": "1",
             "HF_HUB_DISABLE_PROGRESS_BARS": "1",
@@ -333,7 +336,12 @@ class Installer:
         uv.install(self.layout.tools_dir, self.machine.system, self.machine.arch, progress, self._cancelled)
 
     def _install_python(self):
-        self.run_command([self._uv, "python", "install", self.requirements.python])
+        # Only into the models' folder: no python3.x executable in the user's ~/.local/bin, no Windows registry entry
+        # (uv's defaults), which would change what `python3.11` means on the machine
+        argv = [self._uv, "python", "install", "--no-bin", self.requirements.python]
+        if self.machine.system == WINDOWS:
+            argv.insert(4, "--no-registry")
+        self.run_command(argv)
 
     def _create_env(self):
         self.run_command([self._uv, "venv", "--clear", "--python", self.requirements.python, self.layout.env_dir])
