@@ -28,6 +28,9 @@ class Machine:
     system: str          # WINDOWS, LINUX, MACOS
     arch: str            # "x86_64", "arm64"
     gpus: tuple = ()     # NVIDIA GPUs (Gpu)
+    # A C++ compiler and git are there: a package's C++ extension can be built from source
+    cpp_compiler: bool = False
+    git: bool = False
 
     @property
     def gpu(self):

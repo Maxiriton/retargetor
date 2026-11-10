@@ -69,9 +69,29 @@ def nvidia_gpus():
     return parse_nvidia_smi(result.stdout) if result.returncode == 0 else ()
 
 
+def cpp_compiler(system=None, which=shutil.which):
+    """A C++ compiler CMake can use: Visual Studio's (found by vswhere, with the C++ tools) on Windows, c++ / g++ /
+    clang++ elsewhere"""
+    system = system or system_name()
+    if system == WINDOWS:
+        vswhere = os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                               "Microsoft Visual Studio", "Installer", "vswhere.exe")
+        if not os.path.isfile(vswhere):
+            return False
+        try:
+            result = subprocess.run([vswhere, "-latest", "-products", "*", "-requires",
+                                     "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property",
+                                     "installationPath"], capture_output=True, text=True, timeout=20, **_NO_WINDOW)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return result.returncode == 0 and bool(result.stdout.strip())
+    return any(which(name) for name in ("c++", "g++", "clang++"))
+
+
 def detect(refresh=False):
     """This machine (detected once, then cached)"""
     global _cached
     if _cached is None or refresh:
-        _cached = Machine(system_name(), arch_name(), nvidia_gpus())
+        system = system_name()
+        _cached = Machine(system, arch_name(), nvidia_gpus(), cpp_compiler(system), shutil.which("git") is not None)
     return _cached
