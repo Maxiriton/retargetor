@@ -688,7 +688,8 @@ def draw_models(layout, context, prefs):
                   icon='ERROR')
     current = active_backend(context)
     for backend in registry.visible(prefs.developer):
-        draw_backend(layout, context, prefs, backend, backend is current)
+        draw_backend(layout, context, prefs, backend.configured(backend_settings(context, backend)),
+                     backend.id == current.id)
 
 
 classes = (

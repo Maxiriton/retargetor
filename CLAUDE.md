@@ -6,7 +6,7 @@ Retargetor is a Blender extension (Blender 5.2+) that retargets animation betwee
 
 ## Architecture rules
 
-- **The motion model must be swappable.** Kimodo is only the first backend. No Kimodo name, constant or convention (Y-up, axis-angle, SOMA joint names, 30 fps) outside `backends/kimodo/`.
+- **The motion model must be swappable.** Kimodo and ARDY are two backends among others. No model's name, constant or convention (Y-up, axis-angle, SOMA joint names, 30 fps) outside its folder in `backends/`; what several backends share (NVIDIA's Y-up conventions, the SOMA skeleton) lives in `backends/shared/`, never in the add-on.
 - **Blender never imports the model or torch.** Each backend runs as a worker process with its own Python, and talks to Blender over JSON.
 - **A backend declares what its model needs** (`Backend.requirements()`: Python, packages, weights; `backends/setup/spec.py`); the add-on installs and checks it from that. Never ask for, read, store or send the user's Hugging Face token: huggingface_hub uses their own sign-in.
 - **Blender-side data uses Blender conventions**: Z-up, meters, quaternions, Blender frame numbers and scene fps. The backend adapter converts.
@@ -43,13 +43,15 @@ Retargetor is a Blender extension (Blender 5.2+) that retargets animation betwee
 | `backends/` | `base.py` (what a backend declares), `protocol.py` (JSON lines protocol, shared with the workers), `process.py` (worker process), `registry.py` (backends list, running workers) |
 | `backends/setup/` | Installing and checking a model (no `bpy`): `spec.py` (Requirements, Machine), `machine.py` (nvidia-smi), `paths.py` (models' folder, Hugging Face cache), `uv.py` (pinned uv download), `installer.py` (steps, `install.json`, resume, repair, remove), `weights.py` (weights on disk), `checks.py` (CheckItems with their fix), `signin.py`; `env_check.py` and `env_download.py` run with the model environment's Python |
 | `backends/interpolate/` | Test backend: slerp between key poses, one joint per role; worker runs with Blender's Python |
-| `backends/kimodo/` | Kimodo: role map and constants (`joints.py`), conversions (`convert.py`), what it installs (`install.py`: Aero-Ex's fork, pinned), `worker.py` (runs in the Kimodo venv) |
+| `backends/shared/` | What several backends share (no `bpy`): `convert.py` (Blender <-> Y-up model conversions, timing, canonical frame, constraint lists, `FrameStream` for streamed windows; Kimodo and ARDY), `soma.py` (SOMA's role map and end-effectors) |
+| `backends/kimodo/` | Kimodo: constants (`joints.py`, SOMA from `shared/soma.py`), what it installs (`install.py`: Aero-Ex's fork, pinned), `worker.py` (runs in the Kimodo venv) |
+| `backends/ardy/` | ARDY: its checkpoints (`models.py`: SOMA 30 fps or Core 20 fps, each with its joint map), what it installs (`install.py`: pinned commit, its C++ post-processing built when a compiler is there), `backend.py` (capabilities per checkpoint: `configured(settings)`), `worker.py` (window by window, streamed) |
 | `presets/` | Rig profile presets (JSON): Rigify, Auto-Rig Pro, CloudRig |
 | `tests/` | `unit/` (Blender's Python, numpy, no `bpy`), `blender/` (headless), `kimodo/` (Kimodo venv), `fixtures/` (synthetic skeletons named like common rigs in `humanoids.py`, the real rigs' manifest `real_rigs.json`); `python tests/run_tests.py` runs them all |
 
 The core takes its inputs as arguments; only the operators read the panel's character. Rest offsets are computed from the two rigs, not stored.
 
-A backend is a folder in `backends/` with a `Backend` subclass (`backend.py`) and a worker script, listed in `backends/registry.py`; nothing outside `backends/` names a backend. Workers run with `python -I` and import only `backends.protocol` and `core.*` (no `bpy`): keep `backends/__init__.py` and `core/__init__.py` free of imports.
+A backend is a folder in `backends/` with a `Backend` subclass (`backend.py`) and a worker script, listed in `backends/registry.py`; nothing outside `backends/` names a backend. Workers run with `python -I` and import only `backends.protocol`, `backends.shared.*`, their own backend's modules without `bpy`, and `core.*`: keep `backends/__init__.py`, `backends/shared/__init__.py` and `core/__init__.py` free of imports. A backend whose capabilities, joint map or skeleton depend on its settings returns a backend declaring them from `configured(settings)` (`preferences.active_backend` applies it), and names its skeleton with `skeleton_id` (the model's armature is rebuilt when it changes).
 
 ## Conventions
 

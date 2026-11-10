@@ -67,6 +67,17 @@ class Backend:
         """The bpy PropertyGroup holding this backend's preferences, or None. Called at registration."""
         return None
 
+    def configured(self, settings):
+        """The backend as its settings make it: a backend whose capabilities, joint map or skeleton depend on its
+        settings (the model chosen) returns a backend with the same id declaring them. settings: an instance of
+        settings_class(), or None. Default: the backend itself."""
+        return self
+
+    @property
+    def skeleton_id(self):
+        """Names the skeleton the backend generates on: the model's armature is rebuilt when it changes"""
+        return self.id
+
     def draw_settings(self, layout, settings):
         """Draw the backend's preferences (settings is an instance of settings_class())."""
 

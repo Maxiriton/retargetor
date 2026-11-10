@@ -383,3 +383,43 @@ def output_to_blender(global_rot_mats, root_positions, canonical, request, timin
     times = model_times(frames, timing.anchors, timing.anchor_indices)
     rotations, positions = resample(rotations, positions, times)
     return quat_to_blender(rotations), to_blender(positions)
+
+
+class FrameStream:
+    """A request's Blender frames, converted as the model's frames come (a model generating window by window):
+    each Blender frame is sent once the model frames around its time are there. Same results as output_to_blender
+    on the whole output."""
+
+    def __init__(self, canonical, request, timing):
+        self.canonical = canonical
+        self.start_frame = request.start_frame
+        frames = np.arange(request.start_frame, request.end_frame + 1)
+        self.times = model_times(frames, timing.anchors, timing.anchor_indices)
+        self.rotations = np.empty((0, 0, 4))
+        self.positions = np.empty((0, 3))
+        self.sent = 0
+
+    @property
+    def done(self):
+        return self.sent >= len(self.times)
+
+    def add(self, global_rot_mats, root_positions):
+        """The next model frames: global_rot_mats (n, joints, 3, 3), root_positions (n, 3), canonical frame"""
+        rotations, positions = self.canonical.undo(quat.from_matrix(global_rot_mats),
+                                                   np.asarray(root_positions, dtype=np.float64))
+        self.rotations = rotations if not len(self.rotations) else np.concatenate((self.rotations, rotations))
+        self.positions = np.concatenate((self.positions, positions))
+
+    def ready(self, final=False):
+        """(first Blender frame, rotations from rest (frames, joints, 4), root positions (frames, 3)), Blender
+        conventions, of the frames complete since the last call; None if there are none. final: the model frames
+        are all there (the last ones may stop short of the range's end)."""
+        last = len(self.positions) - 1
+        if last < 0:
+            return None
+        count = len(self.times) if final else int(np.searchsorted(self.times, last + 1e-9, side="right"))
+        if count <= self.sent:
+            return None
+        first, self.sent = self.sent, count
+        rotations, positions = resample(self.rotations, self.positions, self.times[first:count])
+        return self.start_frame + first, quat_to_blender(rotations), to_blender(positions)

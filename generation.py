@@ -319,7 +319,7 @@ def model_armature(context, rig, backend, skeleton=None):
     is given."""
     state = rig.retargetor
     current = state.model_armature
-    if (current is not None and armature_backend(current) == backend.id
+    if (current is not None and armature_backend(current) == backend.skeleton_id
             and (skeleton is None or armature_skeleton(current) == skeleton)
             and current.name in context.view_layer.objects):
         return current
@@ -327,7 +327,8 @@ def model_armature(context, rig, backend, skeleton=None):
         return None
     if current is not None and armature_skeleton(current) is not None:
         remove_model_armature(current)
-    obj = build_armature(context, skeleton, f"{rig.name}_{backend.id}", models_collection(context), backend.id)
+    obj = build_armature(context, skeleton, f"{rig.name}_{backend.id}", models_collection(context),
+                         backend.skeleton_id)
     obj.show_in_front = True
     obj.display_type = 'WIRE'
     obj.hide_render = True
@@ -717,6 +718,7 @@ class GenerationTask:
         self.synced = []  # the limbs in IK snapped back to IK after the generation (they have an IK snap)
         self.keys_before = None  # generated_keys.snapshot() before the add-on makes user keys (FK snap...)
         self.request = None  # the GenerationRequest sent
+        self.frame_messages = 0  # "frames" messages the backend sent for the last request
         self.partial = False
         self.cancel_requested = False
         # The rig was changed before the backend answered (FK snap...): a cancelled generation keeps it
@@ -928,6 +930,8 @@ class GenerationTask:
                 raise GenerationError("The model's armature was deleted during the generation.")
             self._write_started = time.perf_counter()
             motion = protocol.motion_from_frames(self.job.frames, skeleton.names)
+            # How many "frames" messages the backend sent (several when it streams)
+            self.frame_messages = len(self.job.frames)
             self.worker.forget(self.job)
             chunk = self.chunks[self.chunk_index]
             self.writer = MotionWriter(context, rig, model, self.backend, self.rig_profile, motion,

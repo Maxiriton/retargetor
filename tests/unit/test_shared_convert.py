@@ -251,5 +251,35 @@ class TestCanonical(unittest.TestCase):
         self.assertEqual(constraints[0]["frame_indices"], [0, 1, 2, 3, 4])
 
 
+class TestFrameStream(unittest.TestCase):
+    def test_same_as_the_whole_output(self):
+        """Model frames given window by window: every Blender frame sent once, as output_to_blender gives it"""
+        layout = small_layout()
+        request = make_request(turn=0.7, offset=(1.0, 2.0), fps=24.0, frames=(1, 41, 97))
+        _cons, canonical, timing = convert.request_to_constraints(request, layout, 30.0)
+        count = timing.count
+        rng = np.random.default_rng(3)
+        rotations = quat.to_matrix(quat.normalize(rng.normal(size=(count, 5, 4))))
+        positions = rng.normal(size=(count, 3))
+        whole = convert.output_to_blender(rotations, positions, canonical, request, timing)
+        stream = convert.FrameStream(canonical, request, timing)
+        chunks = []
+        for start in range(0, count, 60):
+            stream.add(rotations[start:start + 60], positions[start:start + 60])
+            chunk = stream.ready(final=start + 60 >= count)
+            if chunk is not None:
+                chunks.append(chunk)
+        self.assertTrue(stream.done)
+        # 121 model frames: three windows of 60, the last one a single frame
+        self.assertEqual(count, 121)
+        self.assertEqual([c[0] for c in chunks], [1, 49, 97])
+        np.testing.assert_allclose(np.concatenate([c[1] for c in chunks]), whole[0], atol=1e-12)
+        np.testing.assert_allclose(np.concatenate([c[2] for c in chunks]), whole[1], atol=1e-12)
+        # A chunk holds only the frames whose model time is there: the first window (model frames 0-59) ends at
+        # Blender frame 48 (model time 58.75); frame 49 (60.0) needs the next window
+        self.assertEqual(len(chunks[0][2]), 48)
+        self.assertIsNone(stream.ready())
+
+
 if __name__ == "__main__":
     unittest.main()

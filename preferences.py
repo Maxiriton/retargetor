@@ -78,15 +78,15 @@ def get_preferences(context):
 
 
 def active_backend(context):
-    """The backend chosen in the preferences; the first visible backend if that one is hidden or unknown"""
+    """The backend chosen in the preferences, as its settings make it (Backend.configured); the first visible
+    backend if that one is hidden or unknown"""
     prefs = get_preferences(context)
     developer = prefs.developer if prefs is not None else False
     visible = registry.visible(developer)
+    chosen = visible[0]
     if prefs is not None:
-        for backend in visible:
-            if backend.id == prefs.backend:
-                return backend
-    return visible[0]
+        chosen = next((backend for backend in visible if backend.id == prefs.backend), chosen)
+    return chosen.configured(backend_settings(context, chosen))
 
 
 def backend_settings(context, backend):
