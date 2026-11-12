@@ -229,7 +229,7 @@ Left from Phase 5, important but kept for after the first release:
 - [ ] Ghost preview of the model's skeleton (nice-to-have).
 - [ ] Clear error messages, progress and cancel (a first version is in Phase 3).
 - [ ] Less video memory: prompt embeddings cached on disk (a prompt already seen doesn't load the text encoder), the text encoder unloaded once the prompt is encoded, the motion model in fp16 (measured against the reference). Proposed in Phase 7, to measure first.
-- [ ] Faster writing for fast or real-time models: compute the controls' values without scene updates (today about 22 ms per frame on Rigify), or preview on the model's armature while generating. ARDY (Phase 7) may bring it forward.
+- [x] Faster writing for fast or real-time models: compute the controls' values without scene updates (branch `claude/fast-writing`, after Phase 7: ARDY generates 4 s in 0.6 s, the writing took 10). The rig model (`core/retarget/rig_model.py`, DESIGN.md "Writing the keys") finds the rig's rigid relations once per writer and needs a scene update only where a relation isn't rigid: Rigify posed in IK, 120 frames, 2.3 s instead of 9.3 (keys and IK snap); Auto-Rig Pro's Mike and CloudRig's Storm, no update besides the frame change: 3 and 3.7 times faster, the same keys within 1e-5. Found on the way: the IK snap twisted Rigify's IK upper arms and thighs by about 6.5° (each placement through their own constraints turned them further). Left: the frame change itself (22 ms on Storm, its meshes deformed), and a preview on the model's armature while generating.
 
 ## Decisions
 

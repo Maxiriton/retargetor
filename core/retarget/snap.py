@@ -11,6 +11,7 @@ import math
 from mathutils import Matrix, Quaternion, Vector
 
 from .pairs import target_map
+from .rig_model import BlenderPoser
 
 
 def rest_rotations(source_obj, target_obj, source_name, target_name):
@@ -181,11 +182,17 @@ class Retargeter:
 
         # Snapping levels, worked out on the first snap (see _dependency_levels)
         self._levels = None
+        # How the target's poses are read and set: through Blender's evaluation, or a RigModel (bake)
+        self.poser = BlenderPoser(target_obj)
 
     @property
     def target_bones(self):
         """Pose bones of the target that receive the pose, in hierarchy order."""
         return [r.tgt_pose_bone for r in self.order]
+
+    def pivots_read(self):
+        """The bones read besides the targets when snapping: {pivot of a translated pair: its target}"""
+        return {r.pair.pivot: r.pair.target for r in self.order if r.pair.pivot and r.pair.use_translation}
 
     def _scaled_target_location(self, resolved):
         """Position of the target bone head (in target armature space) for a bone flagged "Use Translation".
@@ -199,6 +206,7 @@ class Retargeter:
         Everything is computed in world space, so object transforms and scales are taken into account.
         """
         source_obj, target_obj = self.source_obj, self.target_obj
+        poser = self.poser
         src_bone = resolved.src_pose_bone
         src_rest_world = source_obj.matrix_world @ src_bone.bone.head_local
         src_now_world = source_obj.matrix_world @ src_bone.head
@@ -211,10 +219,10 @@ class Retargeter:
             pivot_rest_world = target_obj.matrix_world @ resolved.pivot_bone.head_local
             # The target's offset to the pivot as it is now, in the pivot's space: the controls between them may be
             # posed (Rigify's hips control, between torso and ORG-spine). At rest it is the rest offset.
-            pivot = resolved.pivot_pose_bone
-            pivot_now = target_obj.matrix_world @ pivot.matrix
+            pivot_now = target_obj.matrix_world @ poser.matrix(resolved.pair.pivot)
             pivot_rotation = pivot_now.to_3x3().normalized()
-            offset = pivot_rotation.transposed() @ ((target_obj.matrix_world @ resolved.tgt_pose_bone.head)
+            target_head = poser.matrix(resolved.pair.target).translation
+            offset = pivot_rotation.transposed() @ ((target_obj.matrix_world @ target_head)
                                                     - pivot_now.to_translation())
             # The pivot turned like the source bone, with their rest offset
             now = (source_obj.matrix_world @ src_bone.matrix).to_3x3().normalized()
@@ -244,8 +252,8 @@ class Retargeter:
         through_pivot = False
         if resolved.pivot_pose_bone is not None and add_roll:
             if pair.use_translation and pair.offset_mode == 'REST_OFFSET':
-                relation = (resolved.pivot_pose_bone.matrix.to_quaternion().inverted()
-                            @ tgt_pose_bone.matrix.to_quaternion())
+                relation = (self.poser.matrix(pair.pivot).to_quaternion().inverted()
+                            @ self.poser.matrix(pair.target).to_quaternion())
                 rotation = rotation @ resolved.pivot_offset @ relation
                 through_pivot = True
             elif pair.offset_mode == 'ROLL':
@@ -255,7 +263,7 @@ class Retargeter:
 
         previous_euler = tgt_pose_bone.rotation_euler.copy()
         tgt_pose_bone.rotation_mode = 'QUATERNION'
-        tgt_pose_bone.matrix = Matrix.LocRotScale(location, rotation, None)
+        self.poser.set_matrix(tgt_pose_bone, Matrix.LocRotScale(location, rotation, None))
 
         q_rot = tgt_pose_bone.rotation_quaternion.copy()
 
@@ -345,13 +353,15 @@ class Retargeter:
                     view_layer.update()
 
     def bake(self, scene, view_layer, frames, keytype='KEYFRAME', repetitions=1, previous_rotations=None,
-             skip=None):
+             skip=None, model=None):
         """Snap and key the mapped target bones on each of the given frames (Blender frame numbers).
         Rotations are keyed in each bone's own rotation mode (quaternions with continuous signs); locations only
         on the bones flagged "Use Translation". The current frame is restored at the end. Returns the number of frames baked.
         previous_rotations: {bone name: Quaternion keyed on the previous frame}, to bake in several calls with
         continuous quaternion signs (pass the same dict to each call).
-        skip: {frame: target bone names} neither snapped nor keyed on that frame (bones the user keyed there)."""
+        skip: {frame: target bone names} neither snapped nor keyed on that frame (bones the user keyed there).
+        model: a probed RigModel of the target (written: the targets, read: pivots_read()): the poses come from it,
+        with a scene update only where it needs one, instead of one after each level of bones."""
         frames = sorted(set(int(f) for f in frames))
         keyed = [(r.tgt_pose_bone, r.pair.use_translation, r.rotation_mode == 'QUATERNION') for r in self.order]
         original_frame = scene.frame_current
@@ -362,7 +372,10 @@ class Retargeter:
             for frame in frames:
                 scene.frame_set(frame)
                 skipped = skip.get(frame, ()) if skip else ()
-                self.snap_pose(view_layer, repetitions=repetitions, final_update=False, skip=skipped)
+                if model is None:
+                    self.snap_pose(view_layer, repetitions=repetitions, final_update=False, skip=skipped)
+                else:
+                    self._snap_with_model(model, view_layer, skipped)
 
                 for bone, use_translation, quaternion in keyed:
                     if bone.name in skipped:
@@ -376,6 +389,21 @@ class Retargeter:
             scene.frame_set(original_frame)
 
         return len(frames)
+
+    def _snap_with_model(self, model, view_layer, skip):
+        """Snap every mapped target bone at the current frame, its poses given by the model"""
+        self.poser = model
+        try:
+            model.begin_frame()
+            for index, level in enumerate(model.levels):
+                if index and model.needs_update(level):
+                    view_layer.update()
+                    model.measure(level)
+                for name in level:
+                    if name not in skip:
+                        self._snap(self.resolved[name])
+        finally:
+            self.poser = BlenderPoser(self.target_obj)
 
 
 def snap_pose(context, source_obj, target_obj, pairs, translation_scale=1.0, add_roll=True, repetitions=1):

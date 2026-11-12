@@ -193,3 +193,69 @@ def make_test_scene():
     target = make_armature("TGT", TARGET_BONES, location=(2.0, 0.0, 0.0))
     animate_source(source)
     return source, target
+
+
+### The rig model (core/retarget/rig_model.py) against Blender's evaluation
+
+def rig_keys(rig):
+    """{(data path, index, frame): value} of every key of the rig's action"""
+    from retargetor import generation
+    bag = generation.channelbag(rig)
+    keys = {}
+    if bag is None:
+        return keys
+    for fcurve in bag.fcurves:
+        for point in fcurve.keyframe_points:
+            keys[(fcurve.data_path, fcurve.array_index, round(point.co.x, 3))] = point.co.y
+    return keys
+
+
+def check_rig_model(checks, rig, label, expect_model=True):
+    """Generate In-betweens with the rig model, then again from the same file through Blender's evaluation (the
+    writers' old way): the keys must be the same. The file is saved to a temporary copy and opened again (a
+    generation changes what the next one starts from): the objects must be looked up again afterwards. Returns
+    the rig of the file opened again, with the second generation's keys."""
+    import tempfile
+    from retargetor import generation
+    name = rig.name
+    copy = os.path.join(tempfile.mkdtemp(prefix="retargetor_"), "before.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=copy, copy=True)
+
+    def generate(use_model):
+        generation.USE_RIG_MODEL = use_model
+        try:
+            task = generation.GenerationTask()
+            ok = task.run(bpy.context, bpy.data.objects[name])
+        finally:
+            generation.USE_RIG_MODEL = True
+        how = "with the rig model" if use_model else "through Blender's evaluation"
+        checks.check(ok and task.result is not None, f"{label}: generated {how}")
+        return task, rig_keys(bpy.data.objects[name])
+
+    # Both from the file as saved (what Blender keeps in memory besides, the rig check done once, is left out)
+    bpy.ops.wm.open_mainfile(filepath=copy)
+    task, fast = generate(True)
+    if expect_model:
+        for writer in (task.writer, task.ik_writer):
+            if writer is None:
+                continue
+            updates = writer.model.updates if writer.model is not None else None
+            checks.check(writer.model is not None, f"{label}: {type(writer).__name__} uses the rig model "
+                                                   f"({writer.model_problem or f'{updates} scene updates per frame'})")
+    bpy.ops.wm.open_mainfile(filepath=copy)
+    reference, slow = generate(False)
+
+    def timing(t):
+        return ", ".join(f"{part} {seconds:.2f} s" for part, seconds in t.timings.items()
+                         if part in ("writing", "IK snap"))
+    print(f"FINDING {label}: with the rig model {timing(task)}; through Blender's evaluation {timing(reference)}")
+    checks.check(set(fast) == set(slow), f"{label}: the same keys ({len(set(fast) ^ set(slow))} differ: "
+                                         f"{sorted(set(fast) ^ set(slow))[:3]})")
+    common = set(fast) & set(slow)
+    worst = max((abs(fast[k] - slow[k]), k) for k in common) if common else (0.0, None)
+    print(f"FINDING {label}: worst key difference {worst[0]:.2e} ({worst[1]})")
+    for difference, key in sorted(((abs(fast[k] - slow[k]), k) for k in common), reverse=True)[:12]:
+        if difference > 1e-4:
+            print(f"   {difference:.2e} {key}: {fast[key]:.5f} with the model, {slow[key]:.5f} without")
+    checks.below(worst[0], 1e-4, f"{label}: the rig model writes the same values as Blender's evaluation")
+    return bpy.data.objects[name]

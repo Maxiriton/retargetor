@@ -309,6 +309,8 @@ def main():
     except RuntimeError:
         result = {'CANCELLED'}
     checks.check(result == {'CANCELLED'}, "nothing more to clear")
+    # The writers' rig model gives the keys Blender's evaluation gives, on every limb in IK
+    bootstrap.check_rig_model(checks, rig, "Rigify, every limb in IK")
     checks.finish()
 
 

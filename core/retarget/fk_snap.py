@@ -8,9 +8,12 @@ are snapped to the generated FK pose on every frame, so the limbs play in IK aga
 
 The limbs are described by core.profile.LimbSnap.
 """
-from mathutils import Matrix
+import math
+
+from mathutils import Matrix, Vector
 
 from ..profile import IK_FOLLOW, IK_POLE, IK_REST
+from .rig_model import BlenderPoser
 
 # Below this bend (distance of the joint from the line of the limb, over the limb's length), a pole is drawn back
 # to its rest side: a nearly straight limb's bend side isn't reliable
@@ -181,28 +184,47 @@ def _check_ik_snap(rig_obj, limb):
                            "(Rigify: the forearm or the shin).")
 
 
-def _ik_target(rig_obj, snap):
+def ik_read_bones(rig_obj, limbs):
+    """The bones snap_ik_pose reads besides the IK controls: the bones they follow, and a pole's chain"""
+    pose_bones = rig_obj.pose.bones
+    names = []
+    for limb in limbs:
+        for snap in limb.ik_snap:
+            if snap.mode == IK_REST:
+                continue
+            names.append(snap.followed_bone)
+            parent = pose_bones[snap.followed_bone].parent
+            if snap.mode == IK_POLE and parent is not None:
+                names.append(parent.name)
+    return list(dict.fromkeys(names))
+
+
+def _ik_target(rig_obj, snap, poser=None):
     """The pose matrix an IK control takes from the current pose of the bone it follows"""
     pose_bones = rig_obj.pose.bones
+    poser = poser or BlenderPoser(rig_obj)
     control = pose_bones[snap.ik_control]
     followed = pose_bones[snap.followed_bone]
+    followed_matrix = poser.matrix(followed.name)
     if snap.mode == IK_FOLLOW:
-        return followed.matrix @ followed.bone.matrix_local.inverted() @ control.bone.matrix_local
+        return followed_matrix @ followed.bone.matrix_local.inverted() @ control.bone.matrix_local
     # A pole: in the plane of the chain (the followed bone's parent, then the followed bone), on the side the joint
     # bends, at its rest distance from the joint. Only its position counts: it keeps its orientation.
     parent = followed.parent
-    matrix = control.matrix.copy()
-    root, joint, end = parent.head, followed.head, followed.tail
+    parent_matrix = poser.matrix(parent.name)
+    matrix = poser.matrix(control.name).copy()
+    root, joint = parent_matrix.translation, followed_matrix.translation
+    end = followed_matrix @ Vector((0.0, followed.bone.length, 0.0))
     axis = end - root
     bend = (joint - root) - (joint - root).project(axis)
     # The side the joint bends naturally: where the pole is at rest, seen from the joint, carried by the parent and
     # square to it (the side a straight limb would bend to)
     rest_offset = control.bone.head_local - followed.bone.head_local
-    rest_side = parent.matrix.to_3x3() @ (parent.bone.matrix_local.to_3x3().inverted() @ rest_offset)
+    rest_side = parent_matrix.to_3x3() @ (parent.bone.matrix_local.to_3x3().inverted() @ rest_offset)
     rest_side -= rest_side.project(joint - root)
     rest_side -= rest_side.project(axis)
     if rest_side.length < 1e-9 or axis.length < 1e-9:
-        matrix.translation = (parent.matrix @ parent.bone.matrix_local.inverted()
+        matrix.translation = (parent_matrix @ parent.bone.matrix_local.inverted()
                               @ control.bone.matrix_local).translation
         return matrix
     # A nearly straight limb has no reliable bend side, and the IK chain still bends a little (Rigify's IK stretch):
@@ -262,13 +284,46 @@ def _keep_locked(pose_bone, location, rotation):
                 pose_bone.rotation_euler[i] = rotation[i]
 
 
-def snap_ik_pose(rig_obj, limbs, view_layer, corrections=None):
+def _set_rest(pose_bone):
+    pose_bone.location = (0.0, 0.0, 0.0)
+    if pose_bone.rotation_mode == 'QUATERNION':
+        pose_bone.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+    elif pose_bone.rotation_mode == 'AXIS_ANGLE':
+        pose_bone.rotation_axis_angle = (0.0, 0.0, 1.0, 0.0)
+    else:
+        pose_bone.rotation_euler = (0.0, 0.0, 0.0)
+
+
+def set_rest_controls(rig_obj, limbs):
+    """Put the limbs' REST IK controls to their rest pose (locked channels kept). Returns True if one moved."""
+    pose_bones = rig_obj.pose.bones
+    moved = False
+    for limb in limbs:
+        for snap in limb.ik_snap:
+            if snap.mode != IK_REST:
+                continue
+            pb = pose_bones[snap.ik_control]
+            before = pb.matrix_basis.copy()
+            location, rotation = pb.location.copy(), _rotation_values(pb)
+            _set_rest(pb)
+            _keep_locked(pb, location, rotation)
+            moved = moved or any(abs(a - b) > 1e-9 for row_a, row_b in zip(before, pb.matrix_basis)
+                                 for a, b in zip(row_a, row_b))
+    return moved
+
+
+def snap_ik_pose(rig_obj, limbs, view_layer, corrections=None, model=None):
     """Snap the IK controls of the limbs (LimbSnap.ik_snap) to the current pose of the bones they follow, which
     play the FK pose (the limbs in FK). corrections: {IK control: matrix} applied in the target's space (see
     ik_offsets). The targets are all captured first, then the controls are set in the profile's order, the limbs
-    side by side. Scales and locked channels are kept."""
+    side by side. Scales and locked channels are kept.
+    model: a probed RigModel (written: the limbs' IK controls but their REST ones, read: ik_read_bones), for the
+    poses instead of a scene update after each step."""
     for limb in limbs:
         _check_ik_snap(rig_obj, limb)
+    if model is not None:
+        _snap_ik_with_model(rig_obj, limbs, view_layer, corrections or {}, model)
+        return
     pose_bones = rig_obj.pose.bones
     corrections = corrections or {}
     wanted = {}
@@ -287,13 +342,7 @@ def snap_ik_pose(rig_obj, limbs, view_layer, corrections=None):
             pb = pose_bones[snap.ik_control]
             location, rotation, scale = pb.location.copy(), _rotation_values(pb), pb.scale.copy()
             if snap.mode == IK_REST:
-                pb.location = (0.0, 0.0, 0.0)
-                if pb.rotation_mode == 'QUATERNION':
-                    pb.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
-                elif pb.rotation_mode == 'AXIS_ANGLE':
-                    pb.rotation_axis_angle = (0.0, 0.0, 1.0, 0.0)
-                else:
-                    pb.rotation_euler = (0.0, 0.0, 0.0)
+                _set_rest(pb)
             else:
                 pb.matrix = wanted[snap.ik_control]
                 pb.scale = scale
@@ -303,8 +352,61 @@ def snap_ik_pose(rig_obj, limbs, view_layer, corrections=None):
         _through_own_constraints(rig_obj, placed, view_layer)
 
 
+def _snap_ik_with_model(rig_obj, limbs, view_layer, corrections, model):
+    """snap_ik_pose with the poses from the model: the REST controls first (a scene update if one moved: the
+    model measures the rig after them), then the others level by level, a scene update only where the model
+    needs one. A control the model doesn't follow (in an IK chain) is placed again through its own constraints,
+    as without the model."""
+    pose_bones = rig_obj.pose.bones
+    if set_rest_controls(rig_obj, limbs):
+        view_layer.update()
+    model.begin_frame()
+    snaps = {snap.ik_control: snap for limb in limbs for snap in limb.ik_snap if snap.mode != IK_REST}
+    wanted = {}
+    for name, snap in snaps.items():
+        wanted[name] = _ik_target(rig_obj, snap, model)
+        if name in corrections:
+            wanted[name] = wanted[name] @ corrections[name]
+    for index, level in enumerate(model.levels):
+        if index and model.needs_update(level):
+            view_layer.update()
+            model.measure(level)
+        solved = []
+        for name in level:
+            snap = snaps.get(name)
+            if snap is None:
+                continue
+            pb = pose_bones[name]
+            location, rotation, scale = pb.location.copy(), _rotation_values(pb), pb.scale.copy()
+            model.set_matrix(pb, wanted[name])
+            pb.scale = scale
+            _keep_locked(pb, location, rotation)
+            if model.tracks[name].solved and name not in model.unreachable:
+                solved.append((pb, wanted[name], snap.mode == IK_POLE, location, rotation, scale))
+        if solved:
+            view_layer.update()
+            # A control placing it again didn't move on a frame (there already, or not brought closer) isn't tried
+            # again on the next ones: no scene update for it
+            model.unreachable |= _through_own_constraints(rig_obj, solved, view_layer)
+
+
 # A control placed further than this from where it was wanted is placed again, through its own constraints
 PLACE_TOLERANCE = 1e-4
+# ... unless placing it again changes its basis by less than this
+CONVERGED = 1e-6
+
+
+def _angle(a, b):
+    """The angle between two rotations (quaternions), whatever their signs"""
+    angle = a.rotation_difference(b).angle
+    return min(angle, 2.0 * math.pi - angle)
+
+
+def _place_error(pb, wanted, position_only):
+    """How far a control is from where it was wanted: (distance, angle)"""
+    actual = pb.matrix
+    gap = (actual.translation - wanted.translation).length
+    return gap, 0.0 if position_only else _angle(wanted.to_quaternion(), actual.to_quaternion())
 
 
 def _through_own_constraints(rig_obj, placed, view_layer, passes=4):
@@ -312,28 +414,46 @@ def _through_own_constraints(rig_obj, placed, view_layer, passes=4):
     Of constraints, to the foot or the character's root): setting pose_bone.matrix ignores the bone's own
     constraints. placed: (pose bone, matrix wanted, position only, location, rotation, scale before). The
     constraints are taken as a transform applied on top of the bone's own matrix X (the one its basis gives, from
-    its parent): A = C X, so X' = X A^-1 W puts the bone on W."""
+    its parent): A = C X, so X' = X A^-1 W puts the bone on W.
+    A control that isn't brought closer by being placed again goes back to where it was, and stays: an IK chain's
+    bone (Rigify's IK swing, its rotation locked but on its own axis) can't reach the wanted pose, and placing it
+    again would only turn it further each time. Returns the names of the controls placing again didn't move: there
+    already, or back where they were."""
+    entries = [(pb, wanted, position_only, location, rotation, scale, None, None)
+               for pb, wanted, position_only, location, rotation, scale in placed]
+    restored = set()
     for _ in range(passes):
         again = []
-        for pb, wanted, position_only, location, rotation, scale in placed:
-            actual = pb.matrix
-            if (actual.translation - wanted.translation).length < PLACE_TOLERANCE and (
-                    position_only
-                    or wanted.to_quaternion().rotation_difference(actual.to_quaternion()).angle < PLACE_TOLERANCE):
+        for pb, wanted, position_only, location, rotation, scale, previous, error in entries:
+            gap, angle = _place_error(pb, wanted, position_only)
+            if gap < PLACE_TOLERANCE and angle < PLACE_TOLERANCE:
+                if previous is None:
+                    restored.add(pb.name)
                 continue
+            if previous is not None and not (gap < max(0.5 * error[0], PLACE_TOLERANCE)
+                                             and angle < max(0.5 * error[1], PLACE_TOLERANCE)):
+                pb.matrix_basis = previous
+                restored.add(pb.name)
+                continue
+            actual = pb.matrix
             own = rig_obj.convert_space(pose_bone=pb, matrix=pb.matrix_basis, from_space='LOCAL', to_space='POSE')
             target = wanted.copy()
             if position_only:
                 target = actual.copy()
                 target.translation = wanted.translation
+            basis = pb.matrix_basis.copy()
             pb.matrix = own @ actual.inverted() @ target
             pb.scale = scale
             _keep_locked(pb, location, rotation)
-            again.append((pb, wanted, position_only, location, rotation, scale))
+            # Placed again where it was: nothing more to gain
+            if any(abs(x - y) > CONVERGED for row_a, row_b in zip(basis, pb.matrix_basis)
+                   for x, y in zip(row_a, row_b)):
+                again.append((pb, wanted, position_only, location, rotation, scale, basis, (gap, angle)))
         if not again:
-            return
+            return restored
         view_layer.update()
-        placed = again
+        entries = again
+    return restored
 
 
 def _key_types(rig_obj, data_path, frame):
@@ -377,10 +497,10 @@ def key_ik_controls(rig_obj, limbs, frame, keytype, previous=None, user_keys=Fal
                     _set_key_type(rig_obj, full_path, frame, keytype)
 
 
-def snap_ik_keys(rig_obj, limbs_by_frame, scene, view_layer, keytype, previous=None, corrections=None):
+def snap_ik_keys(rig_obj, limbs_by_frame, scene, view_layer, keytype, previous=None, corrections=None, model=None):
     """On each frame of {frame: limbs}, snap the IK controls of the limbs to the FK pose and key them. previous:
     {control: quaternion} keeping the signs continuous from one call to the next. corrections: {frame: {IK
-    control: matrix}} (see snap_ik_pose). The current frame is restored at the end."""
+    control: matrix}} (see snap_ik_pose). model: see snap_ik_pose. The current frame is restored at the end."""
     original_frame = scene.frame_current
     previous = {} if previous is None else previous
     pose_bones = rig_obj.pose.bones
@@ -390,7 +510,7 @@ def snap_ik_keys(rig_obj, limbs_by_frame, scene, view_layer, keytype, previous=N
             scene.frame_set(frame)
             before = {snap.ik_control: pose_bones[snap.ik_control].rotation_quaternion.copy()
                       for limb in limbs for snap in limb.ik_snap}
-            snap_ik_pose(rig_obj, limbs, view_layer, (corrections or {}).get(frame))
+            snap_ik_pose(rig_obj, limbs, view_layer, (corrections or {}).get(frame), model)
             key_ik_controls(rig_obj, limbs, frame, keytype, previous, before=before)
     finally:
         scene.frame_set(original_frame)
