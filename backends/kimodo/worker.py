@@ -58,18 +58,20 @@ class KimodoHandler:
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         if device == "cpu":
             print(messages.no_cuda(LABEL), file=sys.stderr)
-        self.model = load_model(self.model_name, device=device, default_family="Kimodo")
+        model = load_model(self.model_name, device=device, default_family="Kimodo")
         # The fork's text encoder loads its weights on first use, from a folder baked into its source by its own
         # installer: point it to the folder the add-on downloaded them to
         folder = os.environ.get("KIMODO_TEXT_ENCODER_DIR", "")
-        encoder = getattr(self.model, "text_encoder", None)
+        encoder = getattr(model, "text_encoder", None)
         if folder and os.path.isdir(folder) and hasattr(encoder, "custom_dir"):
             encoder.custom_dir = folder
         # The fork loads its text encoder on first use: load it now, so that the model is ready once loaded
         if getattr(encoder, "model", True) is None and hasattr(encoder, "reload"):
             encoder.reload()
-        if abs(float(self.model.fps) - joints.MODEL_FPS) > 1e-6:
-            raise RuntimeError(f"The model runs at {self.model.fps} fps, the backend expects {joints.MODEL_FPS}.")
+        if abs(float(model.fps) - joints.MODEL_FPS) > 1e-6:
+            raise RuntimeError(f"The model runs at {model.fps} fps, the backend expects {joints.MODEL_FPS}.")
+        # Kept only once loaded whole: a failed load is tried again on the next request
+        self.model = model
 
     def _generate_segments(self, request, timing, constraint_list, context):
         """The request's prompt segments in one pass, with Kimodo's multi-prompt generation: one segment after the

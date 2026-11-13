@@ -82,11 +82,14 @@ class ArdyHandler:
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         if device == "cpu":
             print(messages.no_cuda(LABEL), file=sys.stderr)
+        check_quantization(self.text_encoder)
+        # Kept only once loaded whole: a failed load is tried again on the next request
         if self.text_encoder.quantized:
-            self.model = load_model(self.model_name, device=device, text_encoder=False)
-            self.model.text_encoder = quantized_text_encoder(self.text_encoder, device)
+            model = load_model(self.model_name, device=device, text_encoder=False)
+            model.text_encoder = quantized_text_encoder(self.text_encoder, device)
         else:
-            self.model = load_model(self.model_name, device=device)
+            model = load_model(self.model_name, device=device)
+        self.model = model
         self._skel = self.model.skeleton
         fps = float(self.model.motion_rep.fps)
         if abs(fps - self.checkpoint.fps) > 1e-6 or int(self.model.gen_horizon_len) != self.checkpoint.horizon:
@@ -264,6 +267,14 @@ def window_constraints(constraints, first, end, offset=0):
                 part[key] = [constraint[key][k] for k in picks]
         chosen.append(part)
     return chosen
+
+
+def check_quantization(encoder):
+    """A quantized text encoder needs bitsandbytes (an install made before it was added doesn't have it)"""
+    import importlib.util
+    if encoder.quantized and importlib.util.find_spec("bitsandbytes") is None:
+        raise RuntimeError(f"The {encoder.label} text encoder needs bitsandbytes, which this ARDY environment doesn't "
+                           "have: Install, in the add-on's preferences, adds it (or choose the Full text encoder).")
 
 
 def quantized_text_encoder(encoder, device):

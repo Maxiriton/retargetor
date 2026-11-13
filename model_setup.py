@@ -123,10 +123,14 @@ def setup_problem(context, backend):
         python = existing_python(context, backend)
         problem = "" if python and os.path.isfile(python) else "Python not found"
     if not problem and is_managed(context, backend):
-        # The weights of the settings chosen (another model or text encoder, not downloaded yet): Install gets them.
-        # An existing environment keeps its weights where its own installer put them.
+        # What the settings chosen need and the install doesn't have yet (another model or text encoder, a package
+        # added since: bitsandbytes for ARDY's quantized text encoders): Install gets it. An existing environment
+        # keeps its weights where its own installer put them.
         layout = layout_for(context, backend)
-        if not all(weights_status.status(w, layout).present for w in requirements_for(context, backend).weights):
+        requirements = requirements_for(context, backend)
+        if any(f"packages-{index}" not in state.get("steps", {}) for index in range(len(requirements.packages))):
+            problem = "Packages missing"
+        elif not all(weights_status.status(w, layout).present for w in requirements.weights):
             problem = "Weights missing"
     run = check_runs.get(backend.id)
     if (not problem and run is not None and not run.running and run.python == key[2] and run.items
