@@ -1,8 +1,9 @@
 """What ARDY needs installed (backends.setup.spec.Requirements), for one machine. No bpy.
 
 ARDY (NVIDIA, github.com/nv-tlabs/ardy, Apache-2.0) at a pinned commit, its checkpoints from Hugging Face (NVIDIA
-Open Model License), and its text encoder: LLM2Vec (McGill NLP, MIT) on Meta's Llama 3 8B Instruct, a gated
-repository the user requests access to (Meta Llama 3 Community License). ARDY pins transformers 5.8.1 and numpy < 2:
+Open Model License), and its text encoder: LLM2Vec (McGill NLP, MIT) on Meta's Llama 3 8B Instruct (Meta Llama 3
+Community License), either as ARDY loads it (Meta's gated repository, the user requests access to it) or a quantized
+build (models.TEXT_ENCODERS, not gated; bitsandbytes loads it). ARDY pins transformers 5.8.1 and numpy < 2:
 it can't share Kimodo's environment.
 
 Its post-processing (foot skating, constraints hit exactly) is a C++ extension built from source when the package is
@@ -20,8 +21,8 @@ ARCHIVE = f"{REPOSITORY}/archive/{COMMIT}.zip"
 NVIDIA_MODEL_LICENSE = "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-agreement/"
 LLAMA_LICENSE = "https://www.llama.com/llama3/license/"
 
-# The text encoder (ardy.model.load_model's "llm2vec" preset): LLM2Vec's two adapters on Llama 3 8B Instruct
-TEXT_ENCODER = (
+# The full text encoder (ardy.model.load_model's "llm2vec" preset): LLM2Vec's two adapters on Llama 3 8B Instruct
+FULL_TEXT_ENCODER = (
     Weights("Text encoder adapter (LLM2Vec, MNTP)", "McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp", 0.17,
             required_files=("adapter_config.json", "adapter_model.safetensors", "config.json"),
             license_url="https://huggingface.co/McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp"),
@@ -55,8 +56,19 @@ def torch_packages(machine):
     return Packages("PyTorch (CUDA 12.6)", ("torch==2.7.1",), index_url="https://download.pytorch.org/whl/cu126")
 
 
-def requirements(machine, model=models.DEFAULT_MODEL):
+def text_encoder_weights(name):
+    encoder = models.text_encoder(name)
+    if not encoder.quantized:
+        return FULL_TEXT_ENCODER
+    return (Weights(f"Text encoder ({encoder.label}, LLM2Vec on Llama 3 8B)", encoder.repo_id, encoder.size_gb,
+                    revision=encoder.revision,
+                    required_files=("config.json", "llm2vec_config.json", "model.safetensors", "tokenizer.json"),
+                    license_url=LLAMA_LICENSE),)
+
+
+def requirements(machine, model=models.DEFAULT_MODEL, text_encoder=models.DEFAULT_TEXT_ENCODER):
     model = model if model in models.CHECKPOINTS else models.DEFAULT_MODEL
+    encoder = models.text_encoder(text_encoder)
     torch = torch_packages(machine)
     build = machine.cpp_compiler and machine.git
     env = () if build else (("ARDY_SKIP_MOTION_CORRECTION", "1"),)
@@ -64,22 +76,26 @@ def requirements(machine, model=models.DEFAULT_MODEL):
                     # The PyTorch build installed above stays: its version (2.7.1+cu126) matches the pin
                     (f"ardy @ {ARCHIVE}",) + torch.requirements, env=env)
     notes = [f"ARDY from NVIDIA ({REPOSITORY}, commit {COMMIT[:7]}), its {models.CHECKPOINTS[model].label} "
-             f"model, and its text encoder: LLM2Vec on Meta's Llama 3 8B Instruct, which needs your Hugging Face "
-             f"access (requested on its page)."]
+             f"model, and its text encoder: LLM2Vec on Meta's Llama 3 8B Instruct, "
+             + (f"{encoder.label} ({encoder.repo_id})." if encoder.quantized
+                else "as ARDY loads it, which needs your Hugging Face access (requested on its page).")]
     if not build:
         notes.append("No C++ compiler (or git) found: ARDY is installed without its post-processing, so key poses "
                      "are followed less exactly. Install Visual Studio's C++ build tools (Windows) or a compiler, then "
                      "Repair.")
     return Requirements(
         python=PYTHON,
-        packages=(torch, ardy),
-        weights=(checkpoint_weights(model),) + TEXT_ENCODER,
-        imports=("torch", "ardy", "ardy.model", "transformers", "peft"),
+        # bitsandbytes loads the quantized text encoders: its own step, so that an environment installed before
+        # gets it on Install. The PyTorch build installed above stays (it would pull the latest one from PyPI)
+        packages=(torch, ardy, Packages("bitsandbytes", ("bitsandbytes==0.50.2",) + torch.requirements)),
+        weights=(checkpoint_weights(model),) + text_encoder_weights(text_encoder),
+        imports=("torch", "ardy", "ardy.model", "transformers", "peft")
+        + (("bitsandbytes",) if encoder.quantized else ()),
         optional_imports=(("motion_correction._motion_correction",
                            "ARDY's post-processing is off: key poses are followed less exactly."),),
         cuda=True,
-        # The text encoder in bfloat16 takes about 15 GB, the model about 1
-        min_vram_gb=17.0,
+        # The text encoder, and the model with its windows: about 1.5 GB
+        min_vram_gb=encoder.vram_gb + 1.5,
         disk_gb=6.0,
         notes=tuple(notes),
         licences=(("ARDY code: Apache-2.0", f"{REPOSITORY}/blob/{COMMIT}/LICENSE"),

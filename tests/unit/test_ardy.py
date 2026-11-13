@@ -54,10 +54,26 @@ class TestCheckpoints(unittest.TestCase):
         self.assertEqual([w.repo_id for w in req.weights][0], "nvidia/ARDY-Core-RP-20FPS-Horizon40")
         self.assertEqual(req.packages[1].env, ())
         self.assertIn("cu126", req.packages[0].index_url)
-        # Meta's repository: its weights only (the tokenizer comes from LLM2Vec's)
-        llama = [w for w in req.weights if w.gated]
+        # The 8-bit text encoder by default: one repository, not gated, bitsandbytes imported, 9.5 GB of video memory
+        self.assertEqual([w.repo_id for w in req.weights][1:], ["voxta/Llama-3-8B-LLM2Vec-ARDY-INT8"])
+        self.assertFalse(any(w.gated for w in req.weights))
+        self.assertTrue(req.weights[1].revision)
+        self.assertIn("bitsandbytes", req.imports)
+        self.assertEqual(req.min_vram_gb, 9.5)
+        # bitsandbytes in a step of its own, keeping PyTorch's build
+        self.assertEqual(req.packages[2].requirements[0], "bitsandbytes==0.50.2")
+        self.assertIn("torch==2.7.1", req.packages[2].requirements)
+        # The full one: Meta's repository, its weights only (the tokenizer comes from LLM2Vec's)
+        full = install.requirements(machine, "ARDY-Core-RP-20FPS-Horizon40", "FULL")
+        llama = [w for w in full.weights if w.gated]
         self.assertEqual([w.repo_id for w in llama], ["meta-llama/Meta-Llama-3-8B-Instruct"])
         self.assertNotIn("tokenizer.json", llama[0].required_files)
+        self.assertEqual(len(full.weights), 4)
+        self.assertNotIn("bitsandbytes", full.imports)
+        self.assertEqual(full.min_vram_gb, 16.5)
+        nf4 = install.requirements(machine, "ARDY-Core-RP-20FPS-Horizon40", "NF4")
+        self.assertEqual(nf4.weights[1].repo_id, "voxta/Llama-3-8B-LLM2Vec-ARDY-NF4")
+        self.assertEqual(models.text_encoder("unknown"), models.TEXT_ENCODERS["INT8"])
         # Without a compiler: no post-processing, said before installing
         bare = install.requirements(Machine("linux", "x86_64", (Gpu("RTX 5090", 32607, (12, 0)),)))
         self.assertEqual(bare.packages[1].env, (("ARDY_SKIP_MOTION_CORRECTION", "1"),))

@@ -6,14 +6,14 @@ Rigify rig (rig_keyposes_ik.blend: every limb in IK). One Blender run, the model
 <models folder>: where the add-on installed ARDY (RETARGETOR_MODELS_FOLDER); "existing:<python>" for an existing
 environment instead.
 
-- base: key poses on frames 1, 61, 120 at 30 fps (SOMA checkpoint): streamed (several "frames" messages), key
-  poses untouched, the rig follows the model, feet on the floor; then again with the model loaded: fast, same seed
-  same motion.
+- base: key poses on frames 1, 61, 120 at 30 fps (SOMA checkpoint, the 8-bit text encoder, the default): loaded
+  in under 45 s, streamed (several "frames" messages), key poses untouched, the rig follows the model, feet on the
+  floor; then again with the model loaded: fast, same seed same motion.
 - segments: three prompt segments of 5 s (15 s in all, any length for ARDY): one request, no jump where they meet.
 - segment: the track's second segment regenerated alone with another prompt and seed: the rest unchanged, no jump
   where it meets its neighbours.
-- core: the Core checkpoint chosen in the preferences: its 27-joint armature replaces SOMA's, key poses untouched,
-  the rig follows the model.
+- core: the Core checkpoint and the 4-bit text encoder chosen in the preferences: its 27-joint armature replaces
+  SOMA's, key poses untouched, the rig follows the model.
 """
 import os
 import sys
@@ -32,13 +32,13 @@ SOMA = "ARDY-SOMA-RP-30FPS-Horizon60"
 CORE = "ARDY-Core-RP-20FPS-Horizon40"
 
 
-def setup(environment, model=SOMA):
+def setup(environment, model=SOMA, text_encoder="INT8"):
     bootstrap.register_addon()
     if environment.startswith("existing:"):
-        bootstrap.set_backend("ardy", python=environment[len("existing:"):], model=model)
+        bootstrap.set_backend("ardy", python=environment[len("existing:"):], model=model, text_encoder=text_encoder)
     else:
         os.environ["RETARGETOR_MODELS_FOLDER"] = environment
-        bootstrap.set_backend("ardy", python="managed", model=model)
+        bootstrap.set_backend("ardy", python="managed", model=model, text_encoder=text_encoder)
     rig = bpy.data.objects["rig"]
     bpy.context.view_layer.objects.active = rig
     if not rig.data.retargetor_profile.roles:
@@ -91,6 +91,8 @@ def run_base(checks, rig):
     keys = [1, 61, 120]
     before = common.motion_snapshot(rig, keys)
     task = common.generate(checks, "base, first generation (starts ARDY, loads the model)")
+    checks.below(task.timings["generation"], 45.0, "first generation, ARDY started and loaded with its 8-bit text "
+                                                   "encoder (s)")
     model = rig.retargetor.model_armature
     checks.check(len(model.data.bones) == 77, f"SOMA armature built from ARDY's install ({len(model.data.bones)} bones)")
     # 120 frames at 30 fps: two windows of 60 frames, each one sent when done
@@ -177,14 +179,14 @@ def run_segment(checks, rig):
 def run_core(checks, rig, environment):
     # Back to one prompt, then the Core checkpoint: the worker restarts with it, the armature is rebuilt
     rig.retargetor.segments.clear()
-    setup(environment, CORE)
+    setup(environment, CORE, "NF4")
     backend = active()
     checks.check(backend.capabilities.native_fps == 20.0 and backend.joint_map["thigh.L"] == "LeftUpLeg",
                  "the Core checkpoint's capabilities and joint map")
     keys = [1, 61, 120]
     before = common.motion_snapshot(rig, keys)
     start = time.perf_counter()
-    common.generate(checks, "Core checkpoint (restarts ARDY with it)")
+    common.generate(checks, "Core checkpoint, 4-bit text encoder (restarts ARDY with them)")
     print(f"FINDING Core: {time.perf_counter() - start:.1f} s with the model's load")
     model = rig.retargetor.model_armature
     checks.check(len(model.data.bones) == 27, f"Core armature replaces SOMA's ({len(model.data.bones)} bones)")

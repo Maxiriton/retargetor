@@ -45,7 +45,7 @@ Retargetor is a Blender extension (Blender 5.2+) that retargets animation betwee
 | `backends/interpolate/` | Test backend: slerp between key poses, one joint per role; worker runs with Blender's Python |
 | `backends/shared/` | What several backends share (no `bpy`): `convert.py` (Blender <-> Y-up model conversions, timing, canonical frame, constraint lists, `FrameStream` for streamed windows; Kimodo and ARDY), `soma.py` (SOMA's role map and end-effectors), `messages.py` (the workers' progress messages, worded the same for every model) |
 | `backends/kimodo/` | Kimodo: constants (`joints.py`, SOMA from `shared/soma.py`), what it installs (`install.py`: Aero-Ex's fork, pinned), `worker.py` (runs in the Kimodo venv) |
-| `backends/ardy/` | ARDY: its checkpoints (`models.py`: SOMA 30 fps or Core 20 fps, each with its joint map), what it installs (`install.py`: pinned commit, its C++ post-processing built when a compiler is there), `backend.py` (capabilities per checkpoint: `configured(settings)`), `worker.py` (window by window, streamed) |
+| `backends/ardy/` | ARDY: its checkpoints (`models.py`: SOMA 30 fps or Core 20 fps, each with its joint map; its text encoders: 8-bit (default), 4-bit or full), what it installs (`install.py`: pinned commit, its C++ post-processing built when a compiler is there), `backend.py` (capabilities per checkpoint: `configured(settings)`), `worker.py` (window by window, streamed) |
 | `presets/` | Rig profile presets (JSON): Rigify, Auto-Rig Pro, CloudRig |
 | `tests/` | `unit/` (Blender's Python, numpy, no `bpy`), `blender/` (headless), `kimodo/` (Kimodo venv), `fixtures/` (synthetic skeletons named like common rigs in `humanoids.py`, the real rigs' manifest `real_rigs.json`); `python tests/run_tests.py` runs them all |
 

@@ -1,5 +1,5 @@
 """The ARDY backend's worker, run with the Python of ARDY's environment:
-    <ardy env>/Scripts/python.exe -I -u worker.py --model ARDY-SOMA-RP-30FPS-Horizon60
+    <ardy env>/Scripts/python.exe -I -u worker.py --model ARDY-SOMA-RP-30FPS-Horizon60 --text-encoder INT8
 
 ARDY generates autoregressively, one window (its horizon: 2 s) after the other, each one continuing the last
 frames of the previous ones; the worker sends each window's frames as soon as it is done. As in ARDY's own demo:
@@ -8,8 +8,8 @@ frames of the previous ones; the worker sends each window's frames as soon as it
   the next one starts there with the next prompt (the model makes the transition);
 - the post-processing (feet, key poses hit exactly) runs on each window's new frames, and the next window continues
   the corrected motion.
-The model is loaded once and kept loaded (about a minute: the text encoder is Llama 3 8B in bfloat16); a 5 s
-motion then takes about a second on an RTX 3090.
+The model is loaded once and kept loaded: about 15 s with a quantized text encoder (models.TEXT_ENCODERS), about a
+minute with the full one (Llama 3 8B in bfloat16); a 5 s motion then takes about a second on an RTX 3090.
 """
 import argparse
 import math
@@ -27,8 +27,9 @@ LABEL = "ARDY"
 
 
 class ArdyHandler:
-    def __init__(self, model_name):
+    def __init__(self, model_name, text_encoder=models.DEFAULT_TEXT_ENCODER):
         self.model_name = model_name
+        self.text_encoder = models.text_encoder(text_encoder)
         self.checkpoint = models.checkpoint(model_name)
         self.model = None
         self.postprocess = None
@@ -81,7 +82,11 @@ class ArdyHandler:
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         if device == "cpu":
             print(messages.no_cuda(LABEL), file=sys.stderr)
-        self.model = load_model(self.model_name, device=device)
+        if self.text_encoder.quantized:
+            self.model = load_model(self.model_name, device=device, text_encoder=False)
+            self.model.text_encoder = quantized_text_encoder(self.text_encoder, device)
+        else:
+            self.model = load_model(self.model_name, device=device)
         self._skel = self.model.skeleton
         fps = float(self.model.motion_rep.fps)
         if abs(fps - self.checkpoint.fps) > 1e-6 or int(self.model.gen_horizon_len) != self.checkpoint.horizon:
@@ -261,6 +266,23 @@ def window_constraints(constraints, first, end, offset=0):
     return chosen
 
 
+def quantized_text_encoder(encoder, device):
+    """ARDY's text encoder from a merged, quantized build (models.TextEncoder), from the Hugging Face cache, called
+    as ARDY calls its own (LLM2VecEncoder)"""
+    from huggingface_hub import snapshot_download
+    from ardy.model.llm2vec import LLM2Vec, LLM2VecEncoder
+    folder = snapshot_download(encoder.repo_id, revision=encoder.revision, local_files_only=True)
+    wrapper = LLM2VecEncoder.__new__(LLM2VecEncoder)
+    wrapper.llm_dim = 4096
+    wrapper.model = LLM2Vec.from_pretrained(folder, device_map={"": device})
+    # LLM2Vec picks Llama 3's instruction template from the model's name, which transformers 5 doesn't save: without
+    # it the features aren't the full encoder's
+    wrapper.model.model.config._name_or_path = "meta-llama/Meta-Llama-3-8B-Instruct"
+    wrapper.model.model = wrapper.model.model.eval()
+    wrapper._device = device
+    return wrapper
+
+
 def sentence(prompt):
     prompt = prompt.strip()
     if prompt and not prompt.endswith("."):
@@ -271,8 +293,9 @@ def sentence(prompt):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default=models.DEFAULT_MODEL)
+    parser.add_argument("--text-encoder", default=models.DEFAULT_TEXT_ENCODER)
     args = parser.parse_args()
-    protocol.WorkerLoop(BACKEND_ID, ArdyHandler(args.model)).run()
+    protocol.WorkerLoop(BACKEND_ID, ArdyHandler(args.model, args.text_encoder)).run()
 
 
 if __name__ == "__main__":
