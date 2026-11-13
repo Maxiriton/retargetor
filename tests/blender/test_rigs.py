@@ -179,6 +179,11 @@ def main():
           f"{(mid - b).length * 100:.1f} cm from the second ({(b - a).length * 100:.1f} cm apart)")
     checks.check((mid - a).length > 0.02 and (mid - b).length > 0.02, "the left hand moves between the key poses")
 
+    # The writers' rig model gives the keys Blender's evaluation gives
+    # The file is opened again: look the objects up again
+    rig = bootstrap.check_rig_model(checks, rig, name)
+    scene, view_layer = bpy.context.scene, bpy.context.view_layer
+
     if kimodo_python:
         bootstrap.set_backend("kimodo", python=kimodo_python)
         state = rig.retargetor

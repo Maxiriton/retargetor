@@ -12,10 +12,17 @@ _MODEL_ITEMS = [(name, checkpoint.label, f"nvidia/{name}: {checkpoint.skeleton.u
                  f"{checkpoint.fps:g} fps") for name, checkpoint in models.CHECKPOINTS.items()]
 
 
+_ENCODER_ITEMS = [(name, encoder.label, encoder.description) for name, encoder in models.TEXT_ENCODERS.items()]
+
+
 class RTGTR_ArdySettings(PropertyGroup):
     model: EnumProperty(name="Model", items=_MODEL_ITEMS, default=models.DEFAULT_MODEL,
                         description="ARDY model to load (its weights are downloaded by the install): the SOMA "
                                     "skeleton at 30 fps, or ARDY's own Core skeleton at 20 fps")
+    text_encoder: EnumProperty(name="Text Encoder", items=_ENCODER_ITEMS, default=models.DEFAULT_TEXT_ENCODER,
+                               description="How ARDY's text encoder (Llama 3 8B) is loaded: quantized, it takes less "
+                                           "video memory and loads in seconds (its weights are downloaded by the "
+                                           "install)")
 
 
 def checkpoint_capabilities(checkpoint):
@@ -34,11 +41,11 @@ class ArdyBackend(Backend):
     id = "ardy"
     label = "ARDY"
     description = ("NVIDIA ARDY: text prompt and key poses, any length, streamed window by window "
-                   "(needs a CUDA GPU with 17 GB)")
+                   "(needs a CUDA GPU with 10 GB, its text encoder in 8 bits)")
     checkpoint_name = models.DEFAULT_MODEL
     capabilities = checkpoint_capabilities(models.checkpoint(models.DEFAULT_MODEL))
     joint_map = models.checkpoint(models.DEFAULT_MODEL).joint_map
-    # Llama 3 8B in bfloat16 takes about a minute to load
+    # Llama 3 8B in bfloat16 takes about a minute to load (quantized, a few seconds)
     load_timeout = 900.0
 
     _configured = {}
@@ -48,6 +55,7 @@ class ArdyBackend(Backend):
 
     def draw_settings(self, layout, settings):
         layout.prop(settings, "model")
+        layout.prop(settings, "text_encoder")
 
     def configured(self, settings):
         name = (settings.model if settings is not None else "") or models.DEFAULT_MODEL
@@ -68,12 +76,15 @@ class ArdyBackend(Backend):
         return f"{self.id}-{models.checkpoint(self.checkpoint_name).skeleton}"
 
     def requirements(self, machine, settings):
-        return install.requirements(machine, settings.model if settings is not None else models.DEFAULT_MODEL)
+        if settings is None:
+            return install.requirements(machine)
+        return install.requirements(machine, settings.model, settings.text_encoder)
 
     def worker_command(self, python, settings, layout):
         if not python or not os.path.isfile(python):
             raise ValueError(f"The ARDY Python executable doesn't exist: {python}")
         model = (settings.model if settings is not None else "") or models.DEFAULT_MODEL
+        encoder = (settings.text_encoder if settings is not None else "") or models.DEFAULT_TEXT_ENCODER
         env = {
             # Never download anything: the install downloaded the weights
             "HF_HUB_OFFLINE": "1",
@@ -83,4 +94,4 @@ class ArdyBackend(Backend):
             "TEXT_ENCODER_MODE": "local",
             "LOCAL_CACHE": "true",
         }
-        return [python, "-I", "-u", worker_script(__file__), "--model", model], env
+        return [python, "-I", "-u", worker_script(__file__), "--model", model, "--text-encoder", encoder], env

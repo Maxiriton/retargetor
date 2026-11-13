@@ -33,7 +33,7 @@ Retargetor is a Blender extension (Blender 5.2+) that retargets animation betwee
 | `segment_draw.py` | Prompt segments drawn as bands in the Dope Sheet and Graph Editor (layout and hit test as plain functions), View menu toggle |
 | `segment_mouse.py` | The bands handled with the mouse (keymap items passing the event through off the bands): hover, click, drag, popup, menu |
 | `generate_operators.py` | Generate and Regenerate Segment (modal, Esc cancels; `execute` blocks, for scripts and tests), cancel, Clear Generated Keys, start / stop the model |
-| `core/retarget/` | `pairs.py` (`BonePair`, no `bpy`), `snap.py` (`Retargeter`: snap and bake on given frames, offsets computed from the rigs, each bone keyed in its own rotation mode), `fk_snap.py` (FK controls snapped to the IK pose before generating, IK controls snapped to the generated FK pose after) |
+| `core/retarget/` | `pairs.py` (`BonePair`, no `bpy`), `snap.py` (`Retargeter`: snap and bake on given frames, offsets computed from the rigs, each bone keyed in its own rotation mode), `fk_snap.py` (FK controls snapped to the IK pose before generating, IK controls snapped to the generated FK pose after), `rig_model.py` (`RigModel`: the rig's poses from the controls' basis values, its rigid relations probed once, so the writers need few or no scene updates per frame; `BlenderPoser` reads them through Blender) |
 | `core/roles.py`, `core/profile.py` | Humanoid roles (required ones marked) and the rig profile in neutral form, `compose()` (no `bpy`) |
 | `core/rig_detect.py` | Roles found on a skeleton from its names and hierarchy, the rig's body frame, swapped sides (no `bpy`) |
 | `core/segments.py` | `PromptSegment` and the contiguous track: move a boundary or a segment, split, append, remove (no `bpy`) |
@@ -45,7 +45,7 @@ Retargetor is a Blender extension (Blender 5.2+) that retargets animation betwee
 | `backends/interpolate/` | Test backend: slerp between key poses, one joint per role; worker runs with Blender's Python |
 | `backends/shared/` | What several backends share (no `bpy`): `convert.py` (Blender <-> Y-up model conversions, timing, canonical frame, constraint lists, `FrameStream` for streamed windows; Kimodo and ARDY), `soma.py` (SOMA's role map and end-effectors), `messages.py` (the workers' progress messages, worded the same for every model) |
 | `backends/kimodo/` | Kimodo: constants (`joints.py`, SOMA from `shared/soma.py`), what it installs (`install.py`: Aero-Ex's fork, pinned), `worker.py` (runs in the Kimodo venv) |
-| `backends/ardy/` | ARDY: its checkpoints (`models.py`: SOMA 30 fps or Core 20 fps, each with its joint map), what it installs (`install.py`: pinned commit, its C++ post-processing built when a compiler is there), `backend.py` (capabilities per checkpoint: `configured(settings)`), `worker.py` (window by window, streamed) |
+| `backends/ardy/` | ARDY: its checkpoints (`models.py`: SOMA 30 fps or Core 20 fps, each with its joint map; its text encoders: 8-bit (default), 4-bit or full), what it installs (`install.py`: pinned commit, its C++ post-processing built when a compiler is there), `backend.py` (capabilities per checkpoint: `configured(settings)`), `worker.py` (window by window, streamed) |
 | `presets/` | Rig profile presets (JSON): Rigify, Auto-Rig Pro, CloudRig |
 | `tests/` | `unit/` (Blender's Python, numpy, no `bpy`), `blender/` (headless), `kimodo/` (Kimodo venv), `fixtures/` (synthetic skeletons named like common rigs in `humanoids.py`, the real rigs' manifest `real_rigs.json`); `python tests/run_tests.py` runs them all |
 
@@ -67,6 +67,7 @@ A backend is a folder in `backends/` with a `Backend` subclass (`backend.py`) an
 - `--gui` also runs the tests needing Blender's interface (`test_segment_mouse.py`: the segment bands with simulated mouse events). A window opens on the user's screen for about a minute: say so first. Never start a Blender with its interface without `BLENDER_USER_RESOURCES` pointed at a scratch folder (`run_tests.py` does it): a preference save in that session (the "scripts disabled" popup with "Permanently allow" does one) would overwrite the user's real preferences. The first simulated events after start don't reach the editor: the test warms up with a cancelled drag.
 - Unit tests run with Blender's own Python (numpy included), found next to `blender.exe`.
 - Headless: `"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" -b --factory-startup <file.blend> --python <script.py>`. The `blender` on PATH is 5.0, which is too old for this extension.
+- The writers' rig model is checked against Blender's evaluation by `bootstrap.check_rig_model` (`test_rigs.py`, `test_generate_ik.py`): the same generation with `generation.USE_RIG_MODEL` off must give the same keys.
 - `fcurve.update()` may move the keys in memory: look keyframe points up again after it (a kept reference reads and writes garbage).
 - Setting a custom property from Python doesn't tag the object: call `obj.update_tag()` before reading anything driven by it (Rigify's IK/FK switch).
 - Live inspection goes through the Blender MCP connector; it needs Blender running with the MCP add-on server started.

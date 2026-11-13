@@ -17,7 +17,9 @@ from .backends import process, protocol, registry
 from .core import profile as core_profile
 from .core.motion import GenerationRequest, Motion
 from .core.pose_io import read_pose, write_motion_fcurves
-from .core.retarget.fk_snap import ik_offsets, key_ik_controls, set_limbs_fk, snap_fk_keys, snap_ik_keys
+from .core.retarget.fk_snap import (ik_offsets, ik_read_bones, key_ik_controls, set_limbs_fk, set_rest_controls,
+                                    snap_fk_keys, snap_ik_keys)
+from .core.retarget.rig_model import RigModel, RigModelError
 from .core.retarget.snap import Retargeter, compute_translation_scale
 from .core.skeleton import Skeleton
 from .core.skeleton_io import armature_backend, armature_skeleton, build_armature
@@ -442,9 +444,51 @@ def build_request(context, rig, model, backend, rig_profile, start, end, key_fra
     return request, scale[0], retargeter.errors
 
 
+# Off: the writers read the rig through Blender's evaluation, a scene update after each level of controls (the
+# tests compare both)
+USE_RIG_MODEL = True
+
+
+# Frames of the range, besides the current one, the rig model's relations are checked on
+CHECKED_FRAMES = 6
+
+
+def checked_frames(frames, key_frames=()):
+    """A few frames of the range to check the rig model on: its ends, its middle, and key poses in it"""
+    frames = sorted(frames)
+    if not frames:
+        return []
+    picked = [frames[0], frames[-1], frames[len(frames) // 2]]
+    inside = [f for f in sorted(key_frames) if frames[0] <= f <= frames[-1] and f not in picked]
+    step = max(1, len(inside) // max(1, CHECKED_FRAMES - len(picked)))
+    return picked + inside[::step][:CHECKED_FRAMES - len(picked)]
+
+
+def probe_rig_model(context, rig, written, read=(), translated=(), prepare=None, frames=()):
+    """(RigModel, None) probed on the rig as its animation makes it on the current frame, or (None, why) when the
+    rig doesn't fit it (or USE_RIG_MODEL is off): the writer then reads the rig through Blender's evaluation.
+    prepare(): called after each change of frame, before probing (the REST controls put to rest). frames: other
+    frames the relations are checked on (see checked_frames)."""
+    if not USE_RIG_MODEL:
+        return None, "rig model off"
+    scene = context.scene
+    scene.frame_set(scene.frame_current)
+    if prepare is not None and prepare():
+        context.view_layer.update()
+    model = RigModel(rig, written, read, translated)
+    try:
+        model.probe(context.view_layer, scene, frames, prepare)
+    except RigModelError as e:
+        print(f"Retargetor: '{rig.name}' written through Blender's evaluation: {e}")
+        return None, str(e)
+    return model, None
+
+
 class MotionWriter:
-    """Writes a motion onto the rig in several steps, so Blender stays responsive (about 22 ms per frame on
-    Rigify, all of it in the rig's evaluation). The motion goes on the model's armature first, then is baked onto
+    """Writes a motion onto the rig in several steps, so Blender stays responsive. The rig's poses come from a
+    RigModel (core/retarget/rig_model.py: none or a few scene updates per frame), else from Blender's evaluation
+    (a scene update after each level of controls: about 22 ms per frame on Rigify, much more with the character's
+    meshes). The motion goes on the model's armature first, then is baked onto
     the rig's write controls as GENERATED keys, from start to end. A control is never written on a frame where it
     has a user key (the other controls of that frame are, a partial key pose); the GENERATED keys already in the
     range are removed when the writer is made.
@@ -476,6 +520,11 @@ class MotionWriter:
         self.done = 0
         self._previous_rotations = {}
         self._chunk = 2  # frames per step, adjusted to the time budget after each step
+        order = self.retargeter.order
+        self.model, self.model_problem = probe_rig_model(
+            context, rig, [r.pair.target for r in order], self.retargeter.pivots_read(),
+            [r.pair.target for r in order if r.pair.use_translation],
+            frames=checked_frames(self.frames, self.skip))
 
     @property
     def errors(self):
@@ -495,7 +544,7 @@ class MotionWriter:
             chunk = self.frames[self.done:self.done + self._chunk]
             begin = time.perf_counter()
             self.retargeter.bake(context.scene, context.view_layer, chunk, keytype=GENERATED,
-                                 previous_rotations=self._previous_rotations, skip=self.skip)
+                                 previous_rotations=self._previous_rotations, skip=self.skip, model=self.model)
             per_frame = (time.perf_counter() - begin) / len(chunk)
             self._chunk = max(1, min(100, int(budget / max(per_frame, 1e-4))))
             self.done += len(chunk)
@@ -528,7 +577,7 @@ class IkSnapWriter:
     wider for a single segment, so its offsets are blended as they were when the whole track was generated.
     step() until it returns True."""
 
-    def __init__(self, rig, limbs, start, end, offsets_range=None):
+    def __init__(self, context, rig, limbs, start, end, offsets_range=None):
         self.rig = rig
         self.limbs = limbs
         self.controls = [snap.ik_control for limb in limbs for snap in limb.ik_snap]
@@ -549,6 +598,14 @@ class IkSnapWriter:
         self.done = 0
         self._previous = {}
         self._chunk = 2
+        written = [snap.ik_control for limb in limbs for snap in limb.ik_snap if snap.mode != core_profile.IK_REST]
+        pose_bones = rig.pose.bones
+        # Probed with the REST controls at rest, as they are while writing
+        self.model, self.model_problem = probe_rig_model(
+            context, rig, written, ik_read_bones(rig, limbs),
+            [name for name in written if not all(pose_bones[name].lock_location)],
+            prepare=lambda: set_rest_controls(rig, limbs),
+            frames=checked_frames(self.frames, {f for frames in self.keyed.values() for f in frames}))
 
     def _measure_offsets(self, context):
         """The offsets of the user's IK pose on the keyed frames, blended on the frames to write"""
@@ -593,7 +650,7 @@ class IkSnapWriter:
             if self.corrections is None:
                 self._measure_offsets(context)
             snap_ik_keys(self.rig, {frame: self.by_frame[frame] for frame in chunk}, context.scene,
-                         context.view_layer, GENERATED, self._previous, self.corrections)
+                         context.view_layer, GENERATED, self._previous, self.corrections, self.model)
             per_frame = (time.perf_counter() - begin) / len(chunk)
             self._chunk = max(1, min(100, int(budget / max(per_frame, 1e-4))))
             self.done += len(chunk)
@@ -938,7 +995,7 @@ class GenerationTask:
                                        chunk.write_start, chunk.write_end, self.translation_scale)
             self.ik_writer = None
             if self.synced:
-                self.ik_writer = IkSnapWriter(rig, self.synced, chunk.write_start, chunk.write_end,
+                self.ik_writer = IkSnapWriter(context, rig, self.synced, chunk.write_start, chunk.write_end,
                                               self.track_range)
             self.stage = WRITING
             return False

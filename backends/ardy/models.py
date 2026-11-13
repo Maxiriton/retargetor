@@ -21,6 +21,44 @@ DIFFUSION_STEPS = 10
 # Classifier-free guidance (text, constraints): ARDY's defaults
 CFG_WEIGHT = (2.0, 2.0)
 
+# ARDY's text encoder: LLM2Vec on Llama 3 8B Instruct, as ARDY loads it (in bfloat16, the McGill adapters merged
+# when it loads: 15 GB of video memory, about a minute), or a build with the adapters merged in and the weights
+# quantized (community builds for ARDY, voxta on Hugging Face, not gated). Measured against the full one on 11 motion
+# prompts (2026-11-13, RTX 3090): the text features 0.997 (8-bit) and 0.985 (4-bit) alike on average; the same seed
+# gives the same motion within 1.5 to 3.4 cm with the 8-bit, 5 to 11.5 cm with the 4-bit (another seed: 31 to 36 cm).
+
+
+@dataclass(frozen=True)
+class TextEncoder:
+    label: str
+    description: str
+    repo_id: str = ""        # a merged build ("" for the full one, from its three repositories)
+    revision: str = ""
+    size_gb: float = 0.0
+    vram_gb: float = 15.0    # the encoder alone
+
+    @property
+    def quantized(self):
+        return bool(self.repo_id)
+
+
+TEXT_ENCODERS = {
+    "INT8": TextEncoder("8-bit", "Quantized to 8 bits: 8 GB of video memory, loads in a few seconds, the motion "
+                                 "nearly the full one's", "voxta/Llama-3-8B-LLM2Vec-ARDY-INT8",
+                        "96c7eb1cc9100cd3925662d1093926c00b64a698", 8.1, 8.0),
+    "NF4": TextEncoder("4-bit", "Quantized to 4 bits: 4.7 GB of video memory, loads in a few seconds, the motion "
+                                "a little further from the full one's", "voxta/Llama-3-8B-LLM2Vec-ARDY-NF4",
+                       "f746923e9e7edb3b6fc54aae7dfd8cecb0f52a8f", 4.7, 4.7),
+    "FULL": TextEncoder("Full", "As ARDY loads it (bfloat16): 15 GB of video memory, about a minute to load, "
+                                "Hugging Face access to Meta's Llama 3"),
+}
+DEFAULT_TEXT_ENCODER = "INT8"
+
+
+def text_encoder(name):
+    return TEXT_ENCODERS.get(name) or TEXT_ENCODERS[DEFAULT_TEXT_ENCODER]
+
+
 # ARDY's Core skeleton: humanoid role -> joint. Core's "UpLeg" is the thigh and "Leg" the shin (SOMA's "Leg" is
 # the thigh). Its spine has four joints: Spine1 follows Spine.
 CORE_JOINT_MAP = {
